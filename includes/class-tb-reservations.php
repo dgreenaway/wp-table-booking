@@ -1,0 +1,420 @@
+<?php
+defined('ABSPATH') || exit;
+
+class TB_Reservations {
+
+    private string $rtable;
+    public  string $last_error = '';
+
+    public function __construct() {
+        global $wpdb;
+        $this->rtable = $wpdb->prefix . 'tb_reservations';
+    }
+
+    // -------------------------------------------------------------------------
+    // CRUD
+    // -------------------------------------------------------------------------
+
+    public function create(array $data): int|false {
+        global $wpdb;
+
+        $num      = $this->generate_number();
+        $table_id = !empty($data['table_id'])
+            ? (int) $data['table_id']
+            : $this->find_available_table(
+                $data['reservation_date'],
+                $data['reservation_time'],
+                $data['seating_area'],
+                (int) $data['party_size']
+            );
+
+        $row = [
+            'reservation_number' => $num,
+            'customer_name'      => sanitize_text_field($data['customer_name']),
+            'customer_email'     => sanitize_email($data['customer_email']),
+            'customer_phone'     => sanitize_text_field($data['customer_phone'] ?? ''),
+            'reservation_date'   => sanitize_text_field($data['reservation_date']),
+            'reservation_time'   => sanitize_text_field($data['reservation_time']),
+            'party_size'         => (int) $data['party_size'],
+            'seating_area'       => sanitize_text_field($data['seating_area']),
+            'status'             => 'pending',
+            'special_requests'   => sanitize_textarea_field($data['special_requests'] ?? ''),
+            'created_at'         => current_time('mysql'),
+        ];
+        $fmt = ['%s','%s','%s','%s','%s','%s','%d','%s','%s','%s','%s'];
+
+        // Only include table_id when it has a real value; NULL columns default to NULL.
+        if ($table_id !== null) {
+            $row['table_id'] = $table_id;
+            $fmt[]           = '%d';
+        }
+
+        $ok = $wpdb->insert($this->rtable, $row, $fmt);
+
+        if (!$ok) {
+            $this->last_error = $wpdb->last_error; // capture before logger clears it
+            TB_Logger::error(
+                "Booking insert failed for {$data['customer_name']} ({$data['reservation_date']} {$data['reservation_time']}): " . $this->last_error,
+                'booking'
+            );
+            return false;
+        }
+
+        $id = $wpdb->insert_id;
+
+        TB_Logger::info(
+            "Booking created: #{$num} — {$data['customer_name']} on {$data['reservation_date']} at {$data['reservation_time']}, party of {$data['party_size']}",
+            'booking'
+        );
+
+        // Fire both emails; TB_Emails checks settings internally
+        TB_Emails::send_client_confirmation($id);
+        TB_Emails::send_admin_notification($id);
+
+        return $id;
+    }
+
+    public function get(int $id): ?array {
+        global $wpdb;
+        $row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT r.*, t.table_name, t.capacity AS table_capacity
+                 FROM {$this->rtable} r
+                 LEFT JOIN {$wpdb->prefix}tb_tables t ON r.table_id = t.id
+                 WHERE r.id = %d",
+                $id
+            ),
+            ARRAY_A
+        );
+        return $row ?: null;
+    }
+
+    public function update(int $id, array $data): bool {
+        global $wpdb;
+        $allowed  = ['status','customer_name','customer_email','customer_phone',
+                     'reservation_date','reservation_time','party_size',
+                     'seating_area','table_id','special_requests','admin_notes'];
+        $int_cols = ['party_size','table_id'];
+
+        $fields = $fmts = [];
+        foreach ($allowed as $col) {
+            if (!array_key_exists($col, $data)) continue;
+            $fields[$col] = in_array($col, $int_cols) ? (int) $data[$col] : sanitize_text_field($data[$col]);
+            $fmts[]       = in_array($col, $int_cols) ? '%d' : '%s';
+        }
+
+        if (empty($fields)) return false;
+        $ok = (bool) $wpdb->update($this->rtable, $fields, ['id' => $id], $fmts, ['%d']);
+
+        if ($ok && isset($data['status'])) {
+            TB_Logger::info("Booking #{$id} status → {$data['status']}", 'booking');
+            if (in_array($data['status'], ['cancelled','no_show','completed'], true)) {
+                TB_Reminders::cancel_for_reservation($id);
+            }
+        }
+
+        return $ok;
+    }
+
+    public function delete(int $id): bool {
+        global $wpdb;
+        return (bool) $wpdb->delete($this->rtable, ['id' => $id], ['%d']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Queries
+    // -------------------------------------------------------------------------
+
+    public function get_all(array $args = []): array {
+        global $wpdb;
+        $args = wp_parse_args($args, [
+            'status'   => '',
+            'date'     => '',
+            'area'     => '',
+            'search'   => '',
+            'per_page' => 25,
+            'page'     => 1,
+            'orderby'  => 'reservation_date',
+            'order'    => 'DESC',
+        ]);
+
+        [$where, $params] = $this->build_where($args);
+
+        $allowed_order = ['reservation_date','created_at','customer_name','status','party_size'];
+        $ob = in_array($args['orderby'], $allowed_order) ? $args['orderby'] : 'reservation_date';
+        $od = $args['order'] === 'ASC' ? 'ASC' : 'DESC';
+
+        $limit  = max(1, (int) $args['per_page']);
+        $offset = max(0, ((int) $args['page'] - 1) * $limit);
+        $params[] = $limit;
+        $params[] = $offset;
+
+        return (array) $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT r.*, t.table_name
+                 FROM {$this->rtable} r
+                 LEFT JOIN {$wpdb->prefix}tb_tables t ON r.table_id = t.id
+                 WHERE $where
+                 ORDER BY r.$ob $od, r.reservation_time ASC
+                 LIMIT %d OFFSET %d",
+                $params
+            ),
+            ARRAY_A
+        );
+    }
+
+    public function count(array $args = []): int {
+        global $wpdb;
+        [$where, $params] = $this->build_where($args);
+        return (int) $wpdb->get_var(
+            $wpdb->prepare("SELECT COUNT(*) FROM {$this->rtable} WHERE $where", $params)
+        );
+    }
+
+    public function get_by_date(string $date): array {
+        global $wpdb;
+        return (array) $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT r.*, t.table_name
+                 FROM {$this->rtable} r
+                 LEFT JOIN {$wpdb->prefix}tb_tables t ON r.table_id = t.id
+                 WHERE r.reservation_date = %s AND r.status NOT IN ('cancelled','no_show')
+                 ORDER BY r.reservation_time ASC",
+                $date
+            ),
+            ARRAY_A
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Availability
+    // -------------------------------------------------------------------------
+
+    public function get_availability(string $date, string $area): array {
+        $cfg      = TB_Database::get_all_settings();
+        $opening  = $cfg['opening_time']        ?? '12:00';
+        $closing  = $cfg['closing_time']        ?? '22:00';
+        $slot_dur = (int) ($cfg['slot_duration']       ?? 60);
+        $sit_dur  = max(1, (int) ($cfg['sitting_duration'] ?? 90));
+        $lbo      = (int) ($cfg['last_booking_offset']  ?? 60);
+        $min_adv  = (int) ($cfg['min_advance_hours']    ?? 2) * 3600;
+        $mode     = $cfg['booking_mode'] ?? 'simple';
+
+        $now     = current_time('timestamp');
+        $current = strtotime("$date $opening");
+        // Last slot must leave enough room for the sitting to complete before closing
+        $last    = strtotime("$date $closing") - max($lbo, $sit_dur) * 60;
+
+        $slots = [];
+        while ($current <= $last) {
+            $ts       = $current;
+            $time_str = date('H:i', $ts);
+            $end_ts   = $ts + $sit_dur * 60;
+
+            if ($ts < $now + $min_adv) {
+                $current += $slot_dur * 60;
+                continue;
+            }
+
+            if ($mode === 'layout') {
+                $booked  = $this->get_booked_table_ids($date, $time_str, $sit_dur);
+                $free    = $this->count_free_tables($area, $booked);
+                $slots[] = [
+                    'time'      => $time_str,
+                    'label'     => date('g:i A', $ts),
+                    'end_time'  => date('H:i', $end_ts),
+                    'end_label' => date('g:i A', $end_ts),
+                    'available' => $free > 0,
+                    'tables'    => $free,
+                ];
+            } else {
+                $slots[] = [
+                    'time'      => $time_str,
+                    'label'     => date('g:i A', $ts),
+                    'end_time'  => date('H:i', $end_ts),
+                    'end_label' => date('g:i A', $end_ts),
+                    'available' => $this->has_seat_capacity($date, $time_str, 1, $sit_dur, $cfg),
+                ];
+            }
+
+            $current += $slot_dur * 60;
+        }
+        return $slots;
+    }
+
+    /**
+     * Returns true if the venue has capacity for $party more guests at the given
+     * time slot, accounting for all sittings that overlap that window.
+     * Used in Simple mode only.
+     */
+    public function has_seat_capacity(
+        string $date,
+        string $time,
+        int    $party,
+        int    $sitting_minutes = 0,
+        array  $cfg = []
+    ): bool {
+        global $wpdb;
+        if (empty($cfg))          $cfg             = TB_Database::get_all_settings();
+        if ($sitting_minutes < 1) $sitting_minutes = max(1, (int) ($cfg['sitting_duration'] ?? 90));
+
+        $max      = max(1, (int) ($cfg['max_seats'] ?? 50));
+        $sit_sec  = $sitting_minutes * 60;
+
+        // Sum party sizes of ALL bookings whose sitting window overlaps [T, T+D)
+        $booked = (int) $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COALESCE(SUM(party_size), 0) FROM {$this->rtable}
+                 WHERE reservation_date = %s
+                   AND status NOT IN ('cancelled','completed','no_show')
+                   AND reservation_time        < ADDTIME(%s, SEC_TO_TIME(%d))
+                   AND ADDTIME(reservation_time, SEC_TO_TIME(%d)) > %s",
+                $date,
+                $time, $sit_sec,
+                $sit_sec, $time
+            )
+        );
+        return ($booked + $party) <= $max;
+    }
+
+    /**
+     * Returns IDs of tables whose sitting window conflicts with a new booking
+     * at $time of $sitting_minutes duration.
+     *
+     * Two sittings conflict when [B, B+D) overlaps [T, T+D):
+     *   B < T+D  AND  T < B+D
+     */
+    public function get_booked_table_ids(string $date, string $time, int $sitting_minutes = 0): array {
+        global $wpdb;
+        if ($sitting_minutes < 1) {
+            $sitting_minutes = max(1, (int) TB_Database::get_setting('sitting_duration', '90'));
+        }
+        $sit_sec = $sitting_minutes * 60;
+
+        return (array) $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT DISTINCT table_id FROM {$this->rtable}
+                 WHERE reservation_date = %s
+                   AND status NOT IN ('cancelled','completed','no_show')
+                   AND table_id IS NOT NULL
+                   AND reservation_time        < ADDTIME(%s, SEC_TO_TIME(%d))
+                   AND ADDTIME(reservation_time, SEC_TO_TIME(%d)) > %s",
+                $date,
+                $time, $sit_sec,
+                $sit_sec, $time
+            )
+        );
+    }
+
+    /**
+     * Tables whose sitting is actively running AT $time (for the canvas overlay).
+     * Uses "contains T" logic: B <= T < B+D
+     */
+    public function get_active_table_ids(string $date, string $time): array {
+        global $wpdb;
+        $sit_sec = max(1, (int) TB_Database::get_setting('sitting_duration', '90')) * 60;
+
+        return (array) $wpdb->get_col(
+            $wpdb->prepare(
+                "SELECT DISTINCT table_id FROM {$this->rtable}
+                 WHERE reservation_date = %s
+                   AND status NOT IN ('cancelled','completed','no_show')
+                   AND table_id IS NOT NULL
+                   AND reservation_time               <= %s
+                   AND ADDTIME(reservation_time, SEC_TO_TIME(%d)) > %s",
+                $date,
+                $time, $sit_sec, $time
+            )
+        );
+    }
+
+    public function find_available_table(string $date, string $time, string $area, int $party): ?int {
+        if ((TB_Database::get_setting('booking_mode', 'simple')) === 'simple') {
+            return null; // simple mode — no individual table assignment
+        }
+
+        global $wpdb;
+        $tt     = $wpdb->prefix . 'tb_tables';
+        $booked = $this->get_booked_table_ids($date, $time);
+
+        $excl = '';
+        if (!empty($booked)) {
+            $ids  = implode(',', array_map('intval', $booked));
+            $excl = "AND id NOT IN ($ids)";
+        }
+
+        $id = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT id FROM $tt
+                 WHERE area = %s AND capacity >= %d AND min_capacity <= %d
+                   AND status = 'active' $excl
+                 ORDER BY capacity ASC LIMIT 1",
+                $area,
+                $party,
+                $party
+            )
+        );
+
+        return $id ? (int) $id : null;
+    }
+
+    public function get_stats(): array {
+        global $wpdb;
+        $today = current_time('Y-m-d');
+        return [
+            'today'    => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->rtable} WHERE reservation_date = %s AND status != 'cancelled'", $today)),
+            'pending'  => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$this->rtable} WHERE status = 'pending'"),
+            'upcoming' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->rtable} WHERE reservation_date >= %s AND status NOT IN ('cancelled','completed')", $today)),
+        ];
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private function count_free_tables(string $area, array $booked): int {
+        global $wpdb;
+        $tt   = $wpdb->prefix . 'tb_tables';
+        $excl = '';
+        if (!empty($booked)) {
+            $ids  = implode(',', array_map('intval', $booked));
+            $excl = "AND id NOT IN ($ids)";
+        }
+        return (int) $wpdb->get_var(
+            $wpdb->prepare("SELECT COUNT(*) FROM $tt WHERE area = %s AND status = 'active' $excl", $area)
+        );
+    }
+
+    private function build_where(array $args): array {
+        global $wpdb;
+        $where  = ['1=1'];
+        $params = [];
+
+        if (!empty($args['status'])) {
+            $where[]  = 'r.status = %s';
+            $params[] = $args['status'];
+        }
+        if (!empty($args['date'])) {
+            $where[]  = 'r.reservation_date = %s';
+            $params[] = $args['date'];
+        }
+        if (!empty($args['area'])) {
+            $where[]  = 'r.seating_area = %s';
+            $params[] = $args['area'];
+        }
+        if (!empty($args['search'])) {
+            $like     = '%' . $wpdb->esc_like($args['search']) . '%';
+            $where[]  = '(r.customer_name LIKE %s OR r.customer_email LIKE %s OR r.reservation_number LIKE %s)';
+            $params[] = $like;
+            $params[] = $like;
+            $params[] = $like;
+        }
+
+        return [implode(' AND ', $where), $params];
+    }
+
+    private function generate_number(): string {
+        return 'RES-' . strtoupper(wp_generate_password(8, false));
+    }
+
+}
