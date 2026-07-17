@@ -27,8 +27,9 @@
     --tb-text-faint:     #9ca3af;
     --tb-radius:         8px;
     --tb-font:           -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --tb-max-w:          640px;
 
-    max-width: 640px;
+    max-width: var(--tb-max-w);
     margin: 0 auto;
     font-family: var(--tb-font);
     color: var(--tb-text);
@@ -76,14 +77,28 @@
 .tb-step.done { background: var(--tb-success-light); color: var(--tb-success); }
 .tb-step.done span { background: var(--tb-success); color: #fff; }
 
+/* ------ Honeypot (off-screen, invisible to humans) ---------- */
+.tb-hp-wrap {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
+
 /* ------ Fixed-width scroll wrapper (non-responsive mode) ---- */
 .tb-booking-outer {
     overflow-x: auto;
 }
 .tb-booking-wrap.tb-fixed {
-    width: 640px;
+    width: var(--tb-max-w);
     max-width: none;
 }
+
+/* ------ Form width presets ---------------------------------- */
+.tb-booking-wrap.tb-width-narrow { --tb-max-w: 480px; }
+.tb-booking-wrap.tb-width-wide   { --tb-max-w: 800px; }
+.tb-booking-wrap.tb-width-full   { --tb-max-w: 100%; }
 
 /* ------ Form body ------------------------------------------- */
 .tb-form-body {
@@ -94,11 +109,47 @@
 }
 
 /* Responsive adjustments — skipped automatically in fixed mode
-   because the form is always 640 px wide regardless of viewport */
+   because the form is always a fixed px width regardless of viewport */
 @media (max-width: 480px) {
     .tb-booking-wrap:not(.tb-fixed) .tb-form-body { padding: 18px 14px; }
     .tb-booking-wrap:not(.tb-fixed) .tb-steps     { font-size: 11px; }
     .tb-booking-wrap:not(.tb-fixed) .tb-step span { display: none; }
+}
+
+/* ------ Mobile button stacking ------------------------------ */
+@media (max-width: 480px) {
+    .tb-booking-wrap.tb-stack-btns:not(.tb-fixed) .tb-nav {
+        flex-direction: column-reverse;
+        align-items: stretch;
+    }
+    .tb-booking-wrap.tb-stack-btns:not(.tb-fixed) .tb-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* ------ Progress-bar step indicator (mobile only) ----------- */
+@media (max-width: 480px) {
+    .tb-booking-wrap.tb-steps-progress:not(.tb-fixed) .tb-steps {
+        height: 4px;
+        border-radius: 2px;
+        overflow: hidden;
+        border: none;
+        margin-bottom: 20px;
+        gap: 0;
+    }
+    .tb-booking-wrap.tb-steps-progress:not(.tb-fixed) .tb-step {
+        padding: 0;
+        font-size: 0;
+        gap: 0;
+        border-right: 1px solid var(--tb-bg);
+        height: 4px;
+        background: var(--tb-border);
+        transition: background 0.3s;
+    }
+    .tb-booking-wrap.tb-steps-progress:not(.tb-fixed) .tb-step span { display: none; }
+    .tb-booking-wrap.tb-steps-progress:not(.tb-fixed) .tb-step.done   { background: var(--tb-success); }
+    .tb-booking-wrap.tb-steps-progress:not(.tb-fixed) .tb-step.active { background: var(--tb-primary); }
 }
 
 .tb-panel h3 {
@@ -301,3 +352,20 @@ textarea.tb-input { resize: vertical; min-height: 80px; }
     font-weight: 700;
     letter-spacing: 0.05em;
 }
+
+/* ------ Spacing density ------------------------------------- */
+.tb-booking-wrap.tb-density-compact .tb-form-body      { padding: 16px 18px; }
+.tb-booking-wrap.tb-density-compact .tb-steps          { margin-bottom: 16px; }
+.tb-booking-wrap.tb-density-compact .tb-panel h3       { font-size: 15px; margin-bottom: 12px; }
+.tb-booking-wrap.tb-density-compact .tb-field          { margin-bottom: 10px; }
+.tb-booking-wrap.tb-density-compact .tb-nav            { margin-top: 16px; padding-top: 14px; }
+.tb-booking-wrap.tb-density-compact .tb-area-card      { padding: 10px 8px; }
+.tb-booking-wrap.tb-density-compact .tb-area-card-icon { font-size: 22px; }
+
+.tb-booking-wrap.tb-density-comfortable .tb-form-body      { padding: 40px 48px; }
+.tb-booking-wrap.tb-density-comfortable .tb-steps          { margin-bottom: 40px; }
+.tb-booking-wrap.tb-density-comfortable .tb-panel h3       { font-size: 22px; margin-bottom: 28px; }
+.tb-booking-wrap.tb-density-comfortable .tb-field          { margin-bottom: 24px; }
+.tb-booking-wrap.tb-density-comfortable .tb-nav            { margin-top: 36px; padding-top: 28px; }
+.tb-booking-wrap.tb-density-comfortable .tb-area-card      { padding: 24px 16px; }
+.tb-booking-wrap.tb-density-comfortable .tb-area-card-icon { font-size: 34px; }

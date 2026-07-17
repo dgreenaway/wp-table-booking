@@ -1,12 +1,16 @@
 <?php
 /**
- * Plugin Name: Table Booking
- * Plugin URI:  https://example.com/table-booking
- * Description: A table reservation system with visual floor plan editor.
- * Version:     1.0.0
- * Author:      Table Booking
- * Text Domain: table-booking
- * License:     GPL v2 or later
+ * Plugin Name:       Table Booking
+ * Plugin URI:        https://example.com/table-booking
+ * Description:       A table reservation system with visual floor plan editor.
+ * Version:           1.0.0
+ * Author:            Table Booking
+ * Text Domain:       table-booking
+ * License:           GPL v2 or later
+ * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
+ * Requires at least: 6.0
+ * Requires PHP:      8.0
+ * Tested up to:      6.8
  */
 
 defined('ABSPATH') || exit;
@@ -24,34 +28,47 @@ require_once TB_DIR . 'includes/class-tb-reservations.php';
 require_once TB_DIR . 'includes/class-tb-layout.php';
 require_once TB_DIR . 'includes/class-tb-admin.php';
 require_once TB_DIR . 'includes/class-tb-ajax.php';
+require_once TB_DIR . 'includes/class-tb-privacy.php';
 
 register_activation_hook(__FILE__, function () {
     TB_Database::install();
     TB_Reminders::activate();
+    if (!wp_next_scheduled('tb_cleanup_old_reservations')) {
+        wp_schedule_event(time(), 'weekly', 'tb_cleanup_old_reservations');
+    }
     TB_Logger::info('Plugin activated — v' . TB_VERSION, 'system');
 });
 
-register_deactivation_hook(__FILE__, ['TB_Reminders', 'deactivate']);
+register_deactivation_hook(__FILE__, function () {
+    TB_Reminders::deactivate();
+    $ts = wp_next_scheduled('tb_cleanup_old_reservations');
+    if ($ts) wp_unschedule_event($ts, 'tb_cleanup_old_reservations');
+});
 
 function tb_boot() {
-    TB_Reminders::init(); // register the cron action on every page load
+    load_plugin_textdomain('table-booking', false, dirname(TB_BASENAME) . '/languages');
+
+    TB_Database::maybe_upgrade();
+    TB_Reminders::init();
+    TB_Privacy::register();
+
+    add_action('tb_cleanup_old_reservations', ['TB_Reservations', 'cleanup_old']);
 
     if (is_admin()) {
         (new TB_Admin())->init();
     }
     (new TB_Ajax())->init();
 
-    // Register shortcode for frontend booking form
     add_shortcode('table_booking', 'tb_render_booking_form');
     add_action('wp_enqueue_scripts', 'tb_enqueue_frontend');
+    add_action('template_redirect',  'tb_handle_cancel');
 }
 add_action('plugins_loaded', 'tb_boot');
 
 function tb_enqueue_frontend() {
     if (!has_shortcode(get_post_field('post_content', get_the_ID()), 'table_booking')) return;
 
-    $style      = TB_Database::get_setting('booking_style', 'modern');
-    $responsive = (bool) TB_Database::get_setting('booking_responsive', '1');
+    $style = TB_Database::get_setting('booking_style', 'modern');
 
     if ($style === 'site') {
         wp_enqueue_style('tb-booking', TB_URL . 'public/css/booking-site.css', [], TB_VERSION);
@@ -185,9 +202,90 @@ function tb_style_themes(): array {
     ];
 }
 
+function tb_handle_cancel(): void {
+    if (($_GET['tb_action'] ?? '') !== 'cancel') return;
+
+    $id  = (int) ($_GET['id']  ?? 0);
+    $tok = sanitize_text_field(wp_unslash($_GET['tok'] ?? ''));
+
+    $error = '';
+
+    if (!$id || !$tok) {
+        $error = __('This cancellation link is invalid.', 'table-booking');
+    } else {
+        $res = new TB_Reservations();
+        $row = $res->get($id);
+
+        if (!$row) {
+            $error = __('Reservation not found.', 'table-booking');
+        } else {
+            $expected = hash_hmac('sha256', "cancel:{$id}:{$row['reservation_number']}", wp_salt('secure_auth'));
+            if (!hash_equals($expected, $tok)) {
+                $error = __('This cancellation link is invalid or has expired.', 'table-booking');
+            } elseif (in_array($row['status'], ['cancelled', 'completed', 'no_show'], true)) {
+                $error = __('This reservation has already been cancelled or completed.', 'table-booking');
+            } elseif ($row['status'] === 'seated') {
+                $error = __('Your reservation is already in progress and cannot be cancelled online.', 'table-booking');
+            } else {
+                $ok = $res->update($id, ['status' => 'cancelled']);
+                if (!$ok) {
+                    $error = __('We could not cancel your reservation. Please contact us directly.', 'table-booking');
+                } else {
+                    TB_Logger::info("Guest cancelled reservation #{$row['reservation_number']} (id:{$id})", 'cancel');
+                }
+            }
+        }
+    }
+
+    $success = ($error === '');
+    $cfg     = TB_Database::get_all_settings();
+    $name    = $success ? esc_html($row['customer_name']) : '';
+    $ref     = $success ? esc_html($row['reservation_number']) : '';
+    $restaurant = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
+
+    get_header();
+    ?>
+    <div style="max-width:560px;margin:60px auto;padding:0 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:40px 36px;text-align:center;">
+        <?php if ($success) : ?>
+          <div style="width:56px;height:56px;border-radius:50%;background:#ecfdf5;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px;color:#059669;">&#10003;</div>
+          <h1 style="margin:0 0 8px;font-size:22px;color:#111827;"><?= esc_html__('Reservation Cancelled', 'table-booking') ?></h1>
+          <p style="margin:0 0 20px;color:#6b7280;font-size:15px;">
+            <?= sprintf(
+                esc_html__('Hi %1$s, your reservation %2$s at %3$s has been cancelled. We hope to see you another time.', 'table-booking'),
+                '<strong>' . $name . '</strong>',
+                '<strong>' . $ref . '</strong>',
+                '<strong>' . $restaurant . '</strong>'
+            ) ?>
+          </p>
+          <p style="margin:0;font-size:13px;color:#9ca3af;"><?= esc_html__('No further action is needed.', 'table-booking') ?></p>
+        <?php else : ?>
+          <div style="width:56px;height:56px;border-radius:50%;background:#fef2f2;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px;color:#dc2626;">&#10007;</div>
+          <h1 style="margin:0 0 8px;font-size:22px;color:#111827;"><?= esc_html__('Unable to Cancel', 'table-booking') ?></h1>
+          <p style="margin:0;color:#6b7280;font-size:15px;"><?= esc_html($error) ?></p>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php
+    get_footer();
+    exit;
+}
+
 function tb_render_booking_form() {
-    $responsive  = (bool) TB_Database::get_setting('booking_responsive', '1');
-    $wrap_class  = 'tb-booking-wrap' . ($responsive ? '' : ' tb-fixed');
+    $responsive    = (bool) TB_Database::get_setting('booking_responsive', '1');
+    $form_width    = TB_Database::get_setting('booking_form_width', 'default');
+    $density       = TB_Database::get_setting('booking_density', 'default');
+    $stack_buttons = (bool) TB_Database::get_setting('booking_stack_buttons', '0');
+    $steps_mobile  = TB_Database::get_setting('booking_steps_mobile', 'labels');
+
+    $classes = ['tb-booking-wrap'];
+    if (!$responsive)                 $classes[] = 'tb-fixed';
+    if ($form_width !== 'default')    $classes[] = 'tb-width-' . $form_width;
+    if ($density !== 'default')       $classes[] = 'tb-density-' . $density;
+    if ($stack_buttons)               $classes[] = 'tb-stack-btns';
+    if ($steps_mobile === 'progress') $classes[] = 'tb-steps-progress';
+
+    $wrap_class = implode(' ', $classes);
 
     ob_start();
     if (!$responsive) echo '<div class="tb-booking-outer">';
@@ -195,94 +293,114 @@ function tb_render_booking_form() {
     <div id="tb-booking-wrap" class="<?= esc_attr($wrap_class) ?>">
 
         <!-- Step indicators -->
-        <div class="tb-steps">
-            <div class="tb-step active" data-step="1"><span>1</span> Date &amp; Area</div>
-            <div class="tb-step" data-step="2"><span>2</span> Time &amp; Size</div>
-            <div class="tb-step" data-step="3"><span>3</span> Your Details</div>
-            <div class="tb-step" data-step="4"><span>4</span> Confirm</div>
+        <nav class="tb-steps" aria-label="<?= esc_attr__('Booking progress', 'table-booking') ?>">
+            <div class="tb-step active" data-step="1" aria-current="step"><span aria-hidden="true">1</span> <?= esc_html__('Date &amp; Area', 'table-booking') ?></div>
+            <div class="tb-step" data-step="2"><span aria-hidden="true">2</span> <?= esc_html__('Time &amp; Size', 'table-booking') ?></div>
+            <div class="tb-step" data-step="3"><span aria-hidden="true">3</span> <?= esc_html__('Your Details', 'table-booking') ?></div>
+            <div class="tb-step" data-step="4"><span aria-hidden="true">4</span> <?= esc_html__('Confirm', 'table-booking') ?></div>
+        </nav>
+
+        <!-- Honeypot: off-screen, never sent by JS, catches bots that fill all DOM fields -->
+        <div class="tb-hp-wrap" aria-hidden="true">
+            <label for="tb-hp"><?= esc_html__('Leave this field empty', 'table-booking') ?></label>
+            <input type="text" id="tb-hp" name="tb_hp" tabindex="-1" autocomplete="off">
         </div>
 
         <div class="tb-form-body">
 
             <!-- Step 1: Date & Area -->
-            <div class="tb-panel" id="tb-panel-1">
-                <h3>When &amp; Where?</h3>
+            <div class="tb-panel" id="tb-panel-1" role="group" aria-labelledby="tb-h-step1">
+                <h3 id="tb-h-step1"><?= esc_html__('When & Where?', 'table-booking') ?></h3>
                 <div class="tb-field">
-                    <label for="tb-date">Date</label>
-                    <input type="date" id="tb-date" class="tb-input" autocomplete="off" />
+                    <label for="tb-date"><?= esc_html__('Date', 'table-booking') ?></label>
+                    <input type="date" id="tb-date" class="tb-input" autocomplete="off"
+                           aria-required="true" aria-describedby="tb-error" />
                 </div>
                 <div class="tb-field">
-                    <label>Seating Area</label>
-                    <div id="tb-area-grid" class="tb-area-grid"></div>
+                    <label id="tb-area-lbl"><?= esc_html__('Seating Area', 'table-booking') ?></label>
+                    <div id="tb-area-grid" class="tb-area-grid" role="group" aria-labelledby="tb-area-lbl"></div>
                 </div>
                 <div class="tb-nav">
-                    <button class="tb-btn tb-btn-primary" id="tb-step1-next" disabled>See Available Times &rarr;</button>
+                    <button class="tb-btn tb-btn-primary" id="tb-step1-next" disabled aria-disabled="true">
+                        <?= esc_html__('See Available Times', 'table-booking') ?> &rarr;
+                    </button>
                 </div>
             </div>
 
             <!-- Step 2: Time & Party Size -->
-            <div class="tb-panel" id="tb-panel-2" style="display:none;">
-                <h3>Choose a Time &amp; Party Size</h3>
-                <div class="tb-loading" id="tb-time-loading">Loading available times…</div>
+            <div class="tb-panel" id="tb-panel-2" style="display:none;" role="group" aria-labelledby="tb-h-step2">
+                <h3 id="tb-h-step2"><?= esc_html__('Choose a Time & Party Size', 'table-booking') ?></h3>
+                <div class="tb-loading" id="tb-time-loading" role="status" aria-live="polite">
+                    <?= esc_html__('Loading available times…', 'table-booking') ?>
+                </div>
                 <div class="tb-field" id="tb-time-wrap" style="display:none;">
-                    <label>Available Times</label>
-                    <div id="tb-time-slots" class="tb-time-grid"></div>
+                    <label id="tb-times-lbl"><?= esc_html__('Available Times', 'table-booking') ?></label>
+                    <div id="tb-time-slots" class="tb-time-grid" role="group" aria-labelledby="tb-times-lbl"></div>
                 </div>
                 <div class="tb-field" id="tb-party-wrap" style="display:none;">
-                    <label>Party Size</label>
-                    <div class="tb-party-selector" id="tb-party-selector"></div>
+                    <label id="tb-party-lbl"><?= esc_html__('Party Size', 'table-booking') ?></label>
+                    <div class="tb-party-selector" id="tb-party-selector" role="group" aria-labelledby="tb-party-lbl"></div>
                 </div>
                 <div class="tb-nav">
-                    <button class="tb-btn tb-btn-secondary" id="tb-step2-back">&larr; Back</button>
-                    <button class="tb-btn tb-btn-primary" id="tb-step2-next" disabled>Next &rarr;</button>
+                    <button class="tb-btn tb-btn-secondary" id="tb-step2-back">&larr; <?= esc_html__('Back', 'table-booking') ?></button>
+                    <button class="tb-btn tb-btn-primary" id="tb-step2-next" disabled aria-disabled="true">
+                        <?= esc_html__('Next', 'table-booking') ?> &rarr;
+                    </button>
                 </div>
             </div>
 
             <!-- Step 3: Contact details -->
-            <div class="tb-panel" id="tb-panel-3" style="display:none;">
-                <h3>Your Details</h3>
+            <div class="tb-panel" id="tb-panel-3" style="display:none;" role="group" aria-labelledby="tb-h-step3">
+                <h3 id="tb-h-step3"><?= esc_html__('Your Details', 'table-booking') ?></h3>
                 <div class="tb-field">
-                    <label for="tb-name">Full Name <span class="tb-req">*</span></label>
-                    <input type="text" id="tb-name" class="tb-input" placeholder="Jane Smith" autocomplete="name" />
+                    <label for="tb-name"><?= esc_html__('Full Name', 'table-booking') ?> <span class="tb-req" aria-hidden="true">*</span></label>
+                    <input type="text" id="tb-name" class="tb-input"
+                           placeholder="<?= esc_attr__('Jane Smith', 'table-booking') ?>"
+                           autocomplete="name" aria-required="true" aria-describedby="tb-error" />
                 </div>
                 <div class="tb-field">
-                    <label for="tb-email">Email Address <span class="tb-req">*</span></label>
-                    <input type="email" id="tb-email" class="tb-input" placeholder="jane@example.com" autocomplete="email" />
+                    <label for="tb-email"><?= esc_html__('Email Address', 'table-booking') ?> <span class="tb-req" aria-hidden="true">*</span></label>
+                    <input type="email" id="tb-email" class="tb-input"
+                           placeholder="<?= esc_attr__('jane@example.com', 'table-booking') ?>"
+                           autocomplete="email" aria-required="true" aria-describedby="tb-error" />
                 </div>
                 <div class="tb-field">
-                    <label for="tb-phone">Phone Number</label>
-                    <input type="tel" id="tb-phone" class="tb-input" placeholder="+44 7700 900000" autocomplete="tel" />
+                    <label for="tb-phone"><?= esc_html__('Phone Number', 'table-booking') ?></label>
+                    <input type="tel" id="tb-phone" class="tb-input"
+                           placeholder="<?= esc_attr__('e.g. +44 7700 900000', 'table-booking') ?>"
+                           autocomplete="tel" />
                 </div>
                 <div class="tb-field">
-                    <label for="tb-notes">Special Requests</label>
-                    <textarea id="tb-notes" class="tb-input" rows="3" placeholder="Allergies, high chair, anniversary, etc."></textarea>
+                    <label for="tb-notes"><?= esc_html__('Special Requests', 'table-booking') ?></label>
+                    <textarea id="tb-notes" class="tb-input" rows="3"
+                              placeholder="<?= esc_attr__('Allergies, high chair, anniversary, etc.', 'table-booking') ?>"></textarea>
                 </div>
                 <div class="tb-nav">
-                    <button class="tb-btn tb-btn-secondary" id="tb-step3-back">&larr; Back</button>
-                    <button class="tb-btn tb-btn-primary" id="tb-step3-next">Review &rarr;</button>
+                    <button class="tb-btn tb-btn-secondary" id="tb-step3-back">&larr; <?= esc_html__('Back', 'table-booking') ?></button>
+                    <button class="tb-btn tb-btn-primary" id="tb-step3-next"><?= esc_html__('Review', 'table-booking') ?> &rarr;</button>
                 </div>
             </div>
 
             <!-- Step 4: Review & confirm -->
-            <div class="tb-panel" id="tb-panel-4" style="display:none;">
-                <h3>Review Your Booking</h3>
-                <div class="tb-summary" id="tb-summary"></div>
+            <div class="tb-panel" id="tb-panel-4" style="display:none;" role="group" aria-labelledby="tb-h-step4">
+                <h3 id="tb-h-step4"><?= esc_html__('Review Your Booking', 'table-booking') ?></h3>
+                <div class="tb-summary" id="tb-summary" aria-live="polite"></div>
                 <div class="tb-nav">
-                    <button class="tb-btn tb-btn-secondary" id="tb-step4-back">&larr; Back</button>
-                    <button class="tb-btn tb-btn-primary" id="tb-submit">Confirm Booking</button>
+                    <button class="tb-btn tb-btn-secondary" id="tb-step4-back">&larr; <?= esc_html__('Back', 'table-booking') ?></button>
+                    <button class="tb-btn tb-btn-primary" id="tb-submit"><?= esc_html__('Confirm Booking', 'table-booking') ?></button>
                 </div>
             </div>
 
             <!-- Success -->
-            <div class="tb-panel tb-success" id="tb-panel-success" style="display:none;">
-                <div class="tb-success-icon">&#10003;</div>
-                <h3>Booking Confirmed!</h3>
+            <div class="tb-panel tb-success" id="tb-panel-success" style="display:none;" role="status" aria-live="polite">
+                <div class="tb-success-icon" aria-hidden="true">&#10003;</div>
+                <h3><?= esc_html__('Booking Confirmed!', 'table-booking') ?></h3>
                 <p id="tb-success-msg"></p>
                 <div class="tb-success-ref" id="tb-success-ref"></div>
             </div>
 
             <!-- Error -->
-            <div class="tb-error" id="tb-error" style="display:none;"></div>
+            <div class="tb-error" id="tb-error" style="display:none;" role="alert" aria-live="assertive" aria-atomic="true"></div>
         </div>
     </div>
     <?php

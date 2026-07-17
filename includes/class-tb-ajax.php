@@ -46,6 +46,20 @@ class TB_Ajax {
     public function tb_submit_booking(): void {
         check_ajax_referer('tb_frontend', 'nonce');
 
+        // Honeypot — bots filling all form fields will populate this; JS never sends it.
+        if (!empty($_POST['tb_hp'])) {
+            wp_send_json_error(__('Invalid submission.', 'table-booking'));
+        }
+
+        // Rate limiting: max 3 submission attempts per IP per 10 minutes.
+        $ip      = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'] ?? ''));
+        $rl_key  = 'tb_rl_' . md5($ip);
+        $attempts = (int) get_transient($rl_key);
+        if ($attempts >= 3) {
+            wp_send_json_error(__('Too many booking attempts. Please wait a few minutes and try again.', 'table-booking'));
+        }
+        set_transient($rl_key, $attempts + 1, 10 * MINUTE_IN_SECONDS);
+
         $required = ['date','time','area','party_size','customer_name','customer_email'];
         $data     = [];
 
@@ -73,19 +87,18 @@ class TB_Ajax {
             wp_send_json_error('This time slot is no longer available');
         }
 
+        // Early availability pre-check for fast UX feedback (create() re-verifies under a lock).
         $res  = new TB_Reservations();
         $mode = TB_Database::get_setting('booking_mode', 'simple');
 
         if ($mode === 'layout') {
-            $table_id = $res->find_available_table($data['date'], $data['time'], $data['area'], $party);
-            if (!$table_id) {
-                wp_send_json_error('Sorry, no tables are available for your selection. Please choose a different time or area.');
+            if (!$res->find_available_table($data['date'], $data['time'], $data['area'], $party)) {
+                wp_send_json_error(__('Sorry, no tables are available for your selection. Please choose a different time or area.', 'table-booking'));
             }
         } else {
             if (!$res->has_seat_capacity($data['date'], $data['time'], $party)) {
-                wp_send_json_error('Sorry, we\'re fully booked for that time slot. Please choose a different time.');
+                wp_send_json_error(__('Sorry, we\'re fully booked for that time slot. Please choose a different time.', 'table-booking'));
             }
-            $table_id = null;
         }
 
         $id = $res->create([
@@ -97,12 +110,18 @@ class TB_Ajax {
             'customer_email'   => $data['customer_email'],
             'customer_phone'   => sanitize_text_field($_POST['customer_phone'] ?? ''),
             'special_requests' => sanitize_textarea_field($_POST['special_requests'] ?? ''),
-            'table_id'         => $table_id,
         ]);
 
         if (!$id) {
-            $detail = (defined('WP_DEBUG') && WP_DEBUG) ? ' DB: ' . $res->last_error : '';
-            wp_send_json_error('Could not save reservation. Please try again.' . $detail);
+            $msg = match ($res->last_error) {
+                'no_capacity'  => __('Sorry, that time slot just filled up. Please choose a different time.', 'table-booking'),
+                'no_table'     => __('Sorry, no tables are available. Please choose a different time or area.', 'table-booking'),
+                'lock_timeout' => __('The system is busy processing another booking. Please try again in a moment.', 'table-booking'),
+                default        => (defined('WP_DEBUG') && WP_DEBUG)
+                    ? 'Could not save reservation. DB: ' . $res->last_error
+                    : __('Could not save your reservation. Please try again.', 'table-booking'),
+            };
+            wp_send_json_error($msg);
         }
 
         $booking = $res->get($id);

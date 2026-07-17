@@ -90,9 +90,15 @@ class TB_Emails {
             ? '<p style="' . self::S_NOTE . '">' . esc_html($cfg['cancellation_policy']) . '</p>'
             : '';
 
+        $cancel_token  = hash_hmac('sha256', "cancel:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
+        $cancel_url    = add_query_arg(['tb_action' => 'cancel', 'id' => $id, 'tok' => $cancel_token], home_url('/'));
+        $cancel_link   = '<p style="' . self::S_NOTE . '">Need to cancel? '
+                       . '<a href="' . esc_url($cancel_url) . '" style="color:#6b7280;">Cancel your reservation</a> — no account needed.</p>';
+
         $body_html = '<p style="' . self::S_BODY . '">Hi ' . esc_html($r['customer_name']) . ', thanks for your reservation! '
                    . 'We\'ve received your booking and will confirm it shortly.</p>'
-                   . $cancellation_note;
+                   . $cancellation_note
+                   . $cancel_link;
 
         $html = self::wrap(
             heading:      'Your Booking is Received',

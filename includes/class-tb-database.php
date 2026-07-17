@@ -74,6 +74,13 @@ class TB_Database {
         update_option('tb_db_version', TB_VERSION);
     }
 
+    public static function maybe_upgrade(): void {
+        $installed = get_option('tb_db_version', '0.0.0');
+        if (version_compare($installed, TB_VERSION, '>=')) return;
+        // dbDelta is idempotent — adds missing tables/columns; seed_defaults uses INSERT IGNORE.
+        self::install();
+    }
+
     private static function seed_defaults() {
         global $wpdb;
         $s = $wpdb->prefix . 'tb_settings';
@@ -110,12 +117,19 @@ class TB_Database {
             // Email branding
             'email_logo_id'        => '',
             'email_logo_url'       => '',
-            // Styles
-            'booking_style'        => 'modern',   // modern|dark|classic|minimal|bold|site
-            'booking_responsive'   => '1',
+            // Styles & layout
+            'booking_style'           => 'modern',
+            'booking_responsive'      => '1',
+            'booking_form_width'      => 'default',
+            'booking_density'         => 'default',
+            'booking_stack_buttons'   => '0',
+            'booking_steps_mobile'    => 'labels',
             // Reminder settings
-            'reminders_enabled'    => '1',
-            'reminders'            => TB_Reminders::default_config(),
+            'reminders_enabled'       => '1',
+            'reminders'               => TB_Reminders::default_config(),
+            // Data & privacy
+            'delete_data_on_uninstall' => '0',
+            'data_retention_days'      => '0',
         ];
 
         foreach ($defaults as $key => $value) {
@@ -129,30 +143,45 @@ class TB_Database {
         }
     }
 
-    public static function get_setting(string $key, string $default = ''): string {
+    private static ?array $cache = null;
+
+    public static function get_all_settings(): array {
+        if (self::$cache !== null) return self::$cache;
+
+        $cached = wp_cache_get('tb_settings', 'table-booking');
+        if (false !== $cached) {
+            self::$cache = $cached;
+            return $cached;
+        }
+
         global $wpdb;
-        $s = $wpdb->prefix . 'tb_settings';
-        $v = $wpdb->get_var($wpdb->prepare("SELECT setting_value FROM $s WHERE setting_key = %s", $key));
-        return $v !== null ? (string) $v : $default;
+        $rows = $wpdb->get_results(
+            "SELECT setting_key, setting_value FROM `{$wpdb->prefix}tb_settings`",
+            ARRAY_A
+        );
+        $data = array_column($rows, 'setting_value', 'setting_key');
+
+        wp_cache_set('tb_settings', $data, 'table-booking', HOUR_IN_SECONDS);
+        self::$cache = $data;
+        return $data;
+    }
+
+    public static function get_setting(string $key, string $default = ''): string {
+        $all = self::get_all_settings();
+        return isset($all[$key]) ? (string) $all[$key] : $default;
     }
 
     public static function update_setting(string $key, string $value): void {
         global $wpdb;
-        $s = $wpdb->prefix . 'tb_settings';
         $wpdb->query(
             $wpdb->prepare(
-                "INSERT INTO $s (setting_key, setting_value) VALUES (%s, %s)
+                "INSERT INTO `{$wpdb->prefix}tb_settings` (setting_key, setting_value) VALUES (%s, %s)
                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
                 $key,
                 $value
             )
         );
-    }
-
-    public static function get_all_settings() {
-        global $wpdb;
-        $s    = $wpdb->prefix . 'tb_settings';
-        $rows = $wpdb->get_results("SELECT setting_key, setting_value FROM $s", ARRAY_A);
-        return array_column($rows, 'setting_value', 'setting_key');
+        wp_cache_delete('tb_settings', 'table-booking');
+        self::$cache = null;
     }
 }

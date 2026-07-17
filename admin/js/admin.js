@@ -76,6 +76,14 @@
     });
 
     // =========================================================================
+    // Style picker – update selected card highlight on click
+    // =========================================================================
+    $('input[name="booking_style"]').on('change', function () {
+        $('.tb-style-card').removeClass('tb-style-card-selected');
+        $(this).closest('.tb-style-card').addClass('tb-style-card-selected');
+    });
+
+    // =========================================================================
     // Reminder preview – update label when hours change
     // =========================================================================
     $(document).on('input change', '.tb-reminder-hours', function () {

@@ -12,6 +12,7 @@ class TB_Admin {
         add_action('admin_post_tb_save_styles',        [$this, 'handle_save_styles']);
         add_action('admin_post_tb_delete_reservation', [$this, 'handle_delete_reservation']);
         add_action('admin_post_tb_clear_logs',         [$this, 'handle_clear_logs']);
+        add_action('admin_footer-plugins.php',         [$this, 'deactivation_modal']);
     }
 
     public function register_menu(): void {
@@ -464,9 +465,8 @@ class TB_Admin {
     }
 
     public function page_settings(): void {
-        $cfg       = TB_Database::get_all_settings();
-        $areas     = json_decode($cfg['areas']     ?? '[]', true);
-        $reminders = json_decode($cfg['reminders'] ?? TB_Reminders::default_config(), true);
+        $cfg   = TB_Database::get_all_settings();
+        $areas = json_decode($cfg['areas'] ?? '[]', true);
 
         if (isset($_GET['saved'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>';
@@ -629,6 +629,45 @@ class TB_Admin {
                     </table>
                 </div>
 
+                <!-- ── Data & Privacy ────────────────────────────────── -->
+                <div class="tb-settings-section" id="tb-data-privacy">
+                    <h2>Data &amp; Privacy</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row">Data retention</th>
+                            <td>
+                                <label>
+                                    Auto-delete completed, cancelled, and no-show reservations older than
+                                    <input type="number" name="data_retention_days"
+                                           value="<?= esc_attr($cfg['data_retention_days'] ?? '0') ?>"
+                                           min="0" max="3650" class="small-text"> days
+                                </label>
+                                <p class="description">Set to <strong>0</strong> to keep all reservations indefinitely. When set, a weekly background job removes old closed bookings. Active, pending, and confirmed reservations are never auto-deleted.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Remove data on deletion</th>
+                            <td>
+                                <label>
+                                    <input type="checkbox" name="delete_data_on_uninstall" value="1" <?= checked($cfg['delete_data_on_uninstall'] ?? '0', '1', false) ?>>
+                                    Delete all plugin data when this plugin is removed from WordPress
+                                </label>
+                                <p class="description">
+                                    When ticked, permanently deletes all reservations, tables, settings, and logs when the plugin is deleted from the Plugins screen.
+                                    <strong>This cannot be undone.</strong> Leave unticked to preserve data if you reinstall later.
+                                </p>
+                                <?php
+                                global $wpdb;
+                                $res_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}tb_reservations");
+                                ?>
+                                <p class="description" style="margin-top:6px;">
+                                    Currently storing <strong><?= number_format($res_count) ?> reservation<?= $res_count !== 1 ? 's' : '' ?></strong>.
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
                 <?php submit_button('Save Settings'); ?>
             </form>
         </div>
@@ -766,6 +805,10 @@ class TB_Admin {
             }
             TB_Database::update_setting('areas', wp_json_encode($areas));
         }
+
+        $retention = max(0, (int) ($_POST['data_retention_days'] ?? 0));
+        TB_Database::update_setting('data_retention_days',      (string) $retention);
+        TB_Database::update_setting('delete_data_on_uninstall', isset($_POST['delete_data_on_uninstall']) ? '1' : '0');
 
         TB_Logger::info('Settings saved', 'system');
 
@@ -985,9 +1028,13 @@ class TB_Admin {
             echo '<div class="notice notice-success is-dismissible"><p>Style settings saved.</p></div>';
         }
 
-        $current_style      = TB_Database::get_setting('booking_style', 'modern');
-        $current_responsive = (bool) TB_Database::get_setting('booking_responsive', '1');
-        $themes             = tb_style_themes();
+        $current_style        = TB_Database::get_setting('booking_style', 'modern');
+        $current_responsive   = (bool) TB_Database::get_setting('booking_responsive', '1');
+        $current_width        = TB_Database::get_setting('booking_form_width', 'default');
+        $current_density      = TB_Database::get_setting('booking_density', 'default');
+        $current_stack_btns   = (bool) TB_Database::get_setting('booking_stack_buttons', '0');
+        $current_steps_mobile = TB_Database::get_setting('booking_steps_mobile', 'labels');
+        $themes               = tb_style_themes();
         ?>
         <div class="wrap tb-wrap">
             <h1>Booking Form Styles</h1>
@@ -1025,19 +1072,63 @@ class TB_Admin {
                 </div>
 
                 <div class="tb-settings-section">
-                    <h2>Responsive Layout</h2>
+                    <h2>Layout &amp; Responsiveness</h2>
                     <table class="form-table">
                         <tr>
-                            <th>Mobile optimised</th>
+                            <th scope="row">Form width</th>
+                            <td>
+                                <select name="booking_form_width">
+                                    <option value="narrow"  <?= selected($current_width, 'narrow',  false) ?>>Narrow (480 px) — sidebar or narrow column</option>
+                                    <option value="default" <?= selected($current_width, 'default', false) ?>>Default (640 px)</option>
+                                    <option value="wide"    <?= selected($current_width, 'wide',    false) ?>>Wide (800 px) — hero section or modal</option>
+                                    <option value="full"    <?= selected($current_width, 'full',    false) ?>>Full width — inherit container</option>
+                                </select>
+                                <p class="description">Maximum width of the booking form. Use Narrow for sidebars, Wide or Full for full-width page sections.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Fluid layout</th>
                             <td>
                                 <label>
                                     <input type="checkbox" name="booking_responsive" value="1" <?= checked($current_responsive, true, false) ?>>
-                                    Fluid layout — form stretches to fill its container
+                                    Fluid — form stretches to fill its container
                                 </label>
-                                <p class="description">
-                                    <strong>On:</strong> the form is fluid (<code>width: 100%</code>) and padding/step labels compress on narrow screens.<br>
-                                    <strong>Off:</strong> the form is fixed at 640 px and scrolls horizontally on small screens — useful when your theme controls the layout width.
-                                </p>
+                                <p class="description">Off: the form uses a fixed pixel width and scrolls horizontally when the viewport is narrower.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Spacing density</th>
+                            <td>
+                                <select name="booking_density">
+                                    <option value="compact"     <?= selected($current_density, 'compact',     false) ?>>Compact — tighter padding for sidebars or popups</option>
+                                    <option value="default"     <?= selected($current_density, 'default',     false) ?>>Default</option>
+                                    <option value="comfortable" <?= selected($current_density, 'comfortable', false) ?>>Comfortable — more breathing room</option>
+                                </select>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Mobile buttons</th>
+                            <td>
+                                <label>
+                                    <input type="checkbox" name="booking_stack_buttons" value="1" <?= checked($current_stack_btns, true, false) ?>>
+                                    Stack navigation buttons vertically on narrow screens
+                                </label>
+                                <p class="description">Places the primary action above the back button on screens narrower than 480 px.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Mobile step indicator</th>
+                            <td>
+                                <fieldset>
+                                    <label>
+                                        <input type="radio" name="booking_steps_mobile" value="labels" <?= checked($current_steps_mobile, 'labels', false) ?>>
+                                        Step labels — numbered steps, text hides on very small screens
+                                    </label><br>
+                                    <label style="margin-top:6px;display:block;">
+                                        <input type="radio" name="booking_steps_mobile" value="progress" <?= checked($current_steps_mobile, 'progress', false) ?>>
+                                        Progress bar — compact coloured bar, ideal for narrow embeds
+                                    </label>
+                                </fieldset>
                             </td>
                         </tr>
                     </table>
@@ -1084,6 +1175,54 @@ class TB_Admin {
                '</div>';
     }
 
+    public function deactivation_modal(): void {
+        $settings_url = admin_url('admin.php?page=tb-settings#tb-data-privacy');
+        $plugin_file  = urlencode(TB_BASENAME);
+        ?>
+        <div id="tb-deactivate-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:999999;align-items:center;justify-content:center;">
+            <div style="background:#fff;border-radius:8px;padding:32px;max-width:460px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <h2 style="margin:0 0 12px;font-size:18px;color:#1d2327;">Deactivate Table Booking?</h2>
+                <p style="margin:0 0 14px;color:#374151;line-height:1.6;">
+                    Your reservations, tables, settings, and logs will be <strong>kept</strong>. The booking form will stop appearing on your site and scheduled reminder emails will pause until you reactivate.
+                </p>
+                <p style="margin:0 0 24px;color:#374151;line-height:1.6;">
+                    To permanently delete all data, enable <a href="<?= esc_url($settings_url) ?>"><em>Remove data on deletion</em></a> in Settings, then delete the plugin.
+                </p>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button id="tb-deactivate-cancel" class="button" type="button">Cancel</button>
+                    <a id="tb-deactivate-confirm" href="#" class="button" style="background:#d63638;border-color:#d63638;color:#fff;">Deactivate</a>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function ($) {
+            var $overlay  = $('#tb-deactivate-overlay');
+            var $confirm  = $('#tb-deactivate-confirm');
+            var targetHref = '';
+
+            $('a[href*="action=deactivate"][href*="<?= esc_js($plugin_file) ?>"]').on('click', function (e) {
+                e.preventDefault();
+                targetHref = $(this).attr('href');
+                $overlay.css('display', 'flex');
+            });
+
+            $('#tb-deactivate-cancel').on('click', function () {
+                $overlay.hide();
+            });
+
+            $overlay.on('click', function (e) {
+                if (e.target === this) $overlay.hide();
+            });
+
+            $confirm.on('click', function (e) {
+                e.preventDefault();
+                window.location.href = targetHref;
+            });
+        }(jQuery));
+        </script>
+        <?php
+    }
+
     public function handle_save_styles(): void {
         check_admin_referer('tb_save_styles', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -1092,8 +1231,24 @@ class TB_Admin {
         $style   = sanitize_key($_POST['booking_style'] ?? 'modern');
         if (!in_array($style, $allowed, true)) $style = 'modern';
 
-        TB_Database::update_setting('booking_style',      $style);
-        TB_Database::update_setting('booking_responsive', isset($_POST['booking_responsive']) ? '1' : '0');
+        $allowed_widths = ['narrow', 'default', 'wide', 'full'];
+        $width = sanitize_key($_POST['booking_form_width'] ?? 'default');
+        if (!in_array($width, $allowed_widths, true)) $width = 'default';
+
+        $allowed_densities = ['compact', 'default', 'comfortable'];
+        $density = sanitize_key($_POST['booking_density'] ?? 'default');
+        if (!in_array($density, $allowed_densities, true)) $density = 'default';
+
+        $allowed_steps = ['labels', 'progress'];
+        $steps_mobile = sanitize_key($_POST['booking_steps_mobile'] ?? 'labels');
+        if (!in_array($steps_mobile, $allowed_steps, true)) $steps_mobile = 'labels';
+
+        TB_Database::update_setting('booking_style',         $style);
+        TB_Database::update_setting('booking_form_width',    $width);
+        TB_Database::update_setting('booking_responsive',    isset($_POST['booking_responsive'])    ? '1' : '0');
+        TB_Database::update_setting('booking_density',       $density);
+        TB_Database::update_setting('booking_stack_buttons', isset($_POST['booking_stack_buttons']) ? '1' : '0');
+        TB_Database::update_setting('booking_steps_mobile',  $steps_mobile);
         TB_Logger::info("Booking style set to: $style", 'system');
 
         wp_safe_redirect(admin_url('admin.php?page=tb-styles&saved=1'));

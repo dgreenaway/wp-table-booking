@@ -18,56 +18,80 @@ class TB_Reservations {
     public function create(array $data): int|false {
         global $wpdb;
 
-        $num      = $this->generate_number();
-        $table_id = !empty($data['table_id'])
-            ? (int) $data['table_id']
-            : $this->find_available_table(
-                $data['reservation_date'],
-                $data['reservation_time'],
-                $data['seating_area'],
-                (int) $data['party_size']
-            );
+        $date  = sanitize_text_field($data['reservation_date']);
+        $time  = sanitize_text_field($data['reservation_time']);
+        $area  = sanitize_text_field($data['seating_area']);
+        $party = (int) $data['party_size'];
+        $mode  = TB_Database::get_setting('booking_mode', 'simple');
 
+        // Advisory lock serializes concurrent requests for the same date/time/area,
+        // preventing TOCTOU double-bookings when two submissions race past the
+        // pre-check in the AJAX handler simultaneously.
+        $lock_key = 'tb_slot_' . md5("{$date}_{$time}_{$area}");
+        $locked   = (string) $wpdb->get_var(
+            $wpdb->prepare("SELECT GET_LOCK(%s, 5)", $lock_key)
+        );
+        if ($locked !== '1') {
+            $this->last_error = 'lock_timeout';
+            return false;
+        }
+
+        // Re-verify availability under the lock.
+        if ($mode === 'layout') {
+            $table_id = $this->find_available_table($date, $time, $area, $party);
+            if (!$table_id) {
+                $wpdb->query($wpdb->prepare("SELECT RELEASE_LOCK(%s)", $lock_key));
+                $this->last_error = 'no_table';
+                return false;
+            }
+        } else {
+            $table_id = null;
+            if (!$this->has_seat_capacity($date, $time, $party)) {
+                $wpdb->query($wpdb->prepare("SELECT RELEASE_LOCK(%s)", $lock_key));
+                $this->last_error = 'no_capacity';
+                return false;
+            }
+        }
+
+        $num = $this->generate_number();
         $row = [
             'reservation_number' => $num,
             'customer_name'      => sanitize_text_field($data['customer_name']),
             'customer_email'     => sanitize_email($data['customer_email']),
             'customer_phone'     => sanitize_text_field($data['customer_phone'] ?? ''),
-            'reservation_date'   => sanitize_text_field($data['reservation_date']),
-            'reservation_time'   => sanitize_text_field($data['reservation_time']),
-            'party_size'         => (int) $data['party_size'],
-            'seating_area'       => sanitize_text_field($data['seating_area']),
+            'reservation_date'   => $date,
+            'reservation_time'   => $time,
+            'party_size'         => $party,
+            'seating_area'       => $area,
             'status'             => 'pending',
             'special_requests'   => sanitize_textarea_field($data['special_requests'] ?? ''),
             'created_at'         => current_time('mysql'),
         ];
         $fmt = ['%s','%s','%s','%s','%s','%s','%d','%s','%s','%s','%s'];
 
-        // Only include table_id when it has a real value; NULL columns default to NULL.
         if ($table_id !== null) {
             $row['table_id'] = $table_id;
             $fmt[]           = '%d';
         }
 
         $ok = $wpdb->insert($this->rtable, $row, $fmt);
+        $wpdb->query($wpdb->prepare("SELECT RELEASE_LOCK(%s)", $lock_key));
 
         if (!$ok) {
-            $this->last_error = $wpdb->last_error; // capture before logger clears it
+            $this->last_error = $wpdb->last_error;
             TB_Logger::error(
-                "Booking insert failed for {$data['customer_name']} ({$data['reservation_date']} {$data['reservation_time']}): " . $this->last_error,
+                "Booking insert failed for {$data['customer_name']} ({$date} {$time}): " . $this->last_error,
                 'booking'
             );
             return false;
         }
 
         $id = $wpdb->insert_id;
-
         TB_Logger::info(
-            "Booking created: #{$num} — {$data['customer_name']} on {$data['reservation_date']} at {$data['reservation_time']}, party of {$data['party_size']}",
+            "Booking created: #{$num} — {$data['customer_name']} on {$date} at {$time}, party of {$party}",
             'booking'
         );
 
-        // Fire both emails; TB_Emails checks settings internally
         TB_Emails::send_client_confirmation($id);
         TB_Emails::send_admin_notification($id);
 
@@ -415,6 +439,30 @@ class TB_Reservations {
 
     private function generate_number(): string {
         return 'RES-' . strtoupper(wp_generate_password(8, false));
+    }
+
+    // -------------------------------------------------------------------------
+    // Data retention cleanup (called by weekly cron)
+    // -------------------------------------------------------------------------
+
+    public static function cleanup_old(): void {
+        $days = (int) TB_Database::get_setting('data_retention_days', '0');
+        if ($days < 1) return;
+
+        global $wpdb;
+        $cutoff  = gmdate('Y-m-d', strtotime("-{$days} days"));
+        $deleted = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM `{$wpdb->prefix}tb_reservations`
+                 WHERE reservation_date < %s
+                   AND status IN ('completed','cancelled','no_show')",
+                $cutoff
+            )
+        );
+
+        if ($deleted > 0) {
+            TB_Logger::info("Data retention: removed {$deleted} old reservation(s) (>{$days} days old)", 'system');
+        }
     }
 
 }
