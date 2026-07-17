@@ -180,10 +180,17 @@ class TB_Emails {
         array  $cfg,
         string $accent_color = '#2563eb'
     ): string {
-        $restaurant  = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
-        $site_url    = esc_url(get_bloginfo('url'));
-        $year        = date('Y');
-        $footer      = !empty($cfg['email_footer']) ? esc_html($cfg['email_footer']) : "$restaurant · $site_url";
+        $restaurant = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
+        $site_url   = esc_url(get_bloginfo('url'));
+        $year       = date('Y');
+        $footer     = !empty($cfg['email_footer']) ? esc_html($cfg['email_footer']) : "$restaurant · $site_url";
+        $logo_url   = !empty($cfg['email_logo_url']) ? esc_url($cfg['email_logo_url']) : '';
+
+        $header_content = $logo_url
+            ? '<img src="' . $logo_url . '" alt="' . $restaurant . '" style="display:block;max-height:64px;max-width:220px;margin-bottom:12px;border:0;">'
+              . '<p style="margin:0;font-size:13px;color:rgba(255,255,255,0.8);font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;">' . $restaurant . ' · Table Reservation</p>'
+            : '<p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Georgia,serif;">' . $restaurant . '</p>'
+              . '<p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;">Table Reservation</p>';
 
         return <<<HTML
 <!DOCTYPE html>
@@ -204,8 +211,7 @@ class TB_Emails {
     <!-- HEADER -->
     <tr>
       <td style="background:{$accent_color};padding:28px 36px;">
-        <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;font-family:Georgia,serif;">$restaurant</p>
-        <p style="margin:6px 0 0;font-size:13px;color:rgba(255,255,255,0.75);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">Table Reservation</p>
+        $header_content
       </td>
     </tr>
 

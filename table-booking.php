@@ -70,15 +70,6 @@ function tb_enqueue_frontend() {
             }
         }
 
-        if (!$responsive) {
-            wp_add_inline_style('tb-booking',
-                '@media(max-width:480px){' .
-                '.tb-form-body{padding:28px 32px!important}' .
-                '.tb-steps{font-size:12px!important}' .
-                '.tb-step span{display:inline-flex!important;width:20px;height:20px}' .
-                '}'
-            );
-        }
     }
 
     wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
@@ -195,9 +186,13 @@ function tb_style_themes(): array {
 }
 
 function tb_render_booking_form() {
+    $responsive  = (bool) TB_Database::get_setting('booking_responsive', '1');
+    $wrap_class  = 'tb-booking-wrap' . ($responsive ? '' : ' tb-fixed');
+
     ob_start();
+    if (!$responsive) echo '<div class="tb-booking-outer">';
     ?>
-    <div id="tb-booking-wrap" class="tb-booking-wrap">
+    <div id="tb-booking-wrap" class="<?= esc_attr($wrap_class) ?>">
 
         <!-- Step indicators -->
         <div class="tb-steps">
@@ -291,5 +286,6 @@ function tb_render_booking_form() {
         </div>
     </div>
     <?php
+    if (!$responsive) echo '</div>';
     return ob_get_clean();
 }

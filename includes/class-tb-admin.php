@@ -8,6 +8,7 @@ class TB_Admin {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_action('admin_post_tb_save_reservation',   [$this, 'handle_save_reservation']);
         add_action('admin_post_tb_save_settings',      [$this, 'handle_save_settings']);
+        add_action('admin_post_tb_save_emails',        [$this, 'handle_save_emails']);
         add_action('admin_post_tb_save_styles',        [$this, 'handle_save_styles']);
         add_action('admin_post_tb_delete_reservation', [$this, 'handle_delete_reservation']);
         add_action('admin_post_tb_clear_logs',         [$this, 'handle_clear_logs']);
@@ -26,6 +27,7 @@ class TB_Admin {
         add_submenu_page('tb-reservations', 'Reservations',   'Reservations',   'manage_options', 'tb-reservations', [$this, 'page_reservations']);
         add_submenu_page('tb-reservations', 'Table Layout',   'Table Layout',   'manage_options', 'tb-layout',       [$this, 'page_layout']);
         add_submenu_page('tb-reservations', 'Settings',       'Settings',       'manage_options', 'tb-settings',     [$this, 'page_settings']);
+        add_submenu_page('tb-reservations', 'Emails',         'Emails',         'manage_options', 'tb-emails',       [$this, 'page_emails']);
         add_submenu_page('tb-reservations', 'Styles',         'Styles',         'manage_options', 'tb-styles',       [$this, 'page_styles']);
         add_submenu_page('tb-reservations', 'Activity Log',   'Activity Log',   'manage_options', 'tb-logs',         [$this, 'page_logs']);
     }
@@ -34,6 +36,10 @@ class TB_Admin {
         if (!str_contains($hook, 'tb-')) return;
 
         wp_enqueue_style('tb-admin', TB_URL . 'admin/css/admin-style.css', [], TB_VERSION);
+
+        if (str_contains($hook, 'tb-emails')) {
+            wp_enqueue_media();
+        }
 
         if (str_contains($hook, 'tb-layout')) {
             wp_enqueue_script('tb-layout-editor', TB_URL . 'admin/js/layout-editor.js', ['jquery'], TB_VERSION, true);
@@ -608,91 +614,6 @@ class TB_Admin {
                     <button type="button" class="button" id="tb-add-area" style="margin-top:8px;">+ Add Area</button>
                 </div>
 
-                <!-- ── Email Notifications ───────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Email Notifications</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th><label for="s-from-name">From Name</label></th>
-                            <td><input type="text" id="s-from-name" name="email_from_name" value="<?= esc_attr($cfg['email_from_name'] ?? '') ?>" class="regular-text"></td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-from-email">From Address</label></th>
-                            <td>
-                                <input type="email" id="s-from-email" name="email_from_address" value="<?= esc_attr($cfg['email_from_address'] ?? '') ?>" class="regular-text">
-                                <p class="description">The address emails are sent from. Must be an authorised sender on your mail server.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-admin-email">Admin Notification Address</label></th>
-                            <td>
-                                <input type="email" id="s-admin-email" name="admin_email" value="<?= esc_attr($cfg['admin_email'] ?? get_option('admin_email')) ?>" class="regular-text">
-                                <p class="description">Where new-booking alerts are sent.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Admin alerts</th>
-                            <td><label><input type="checkbox" name="notify_admin" value="1" <?= checked(1, (int)($cfg['notify_admin'] ?? 1)) ?>> Email admin when a new booking is made</label></td>
-                        </tr>
-                        <tr>
-                            <th>Guest confirmation</th>
-                            <td><label><input type="checkbox" name="email_notifications" value="1" <?= checked(1, (int)($cfg['email_notifications'] ?? 1)) ?>> Send confirmation email to guests on booking</label></td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-cancel-policy">Cancellation Policy</label></th>
-                            <td>
-                                <textarea id="s-cancel-policy" name="cancellation_policy" rows="3" class="large-text"><?= esc_textarea($cfg['cancellation_policy'] ?? '') ?></textarea>
-                                <p class="description">Shown at the bottom of client confirmation emails. Leave blank to omit.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-email-footer">Email Footer Text</label></th>
-                            <td>
-                                <input type="text" id="s-email-footer" name="email_footer" value="<?= esc_attr($cfg['email_footer'] ?? '') ?>" class="regular-text" placeholder="e.g. 123 High Street, London · 020 7000 0000">
-                                <p class="description">Appears at the very bottom of every email. Leave blank to use restaurant name + site URL.</p>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- ── Reminder Emails ────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Reminder Emails</h2>
-                    <p class="description">Reminders are sent via WP-Cron (runs hourly). Guests only receive reminders for non-cancelled reservations.</p>
-                    <table class="form-table">
-                        <tr>
-                            <th>Enable reminders</th>
-                            <td><label><input type="checkbox" name="reminders_enabled" value="1" <?= checked(1, (int)($cfg['reminders_enabled'] ?? 1)) ?>> Send automatic reminder emails to guests</label></td>
-                        </tr>
-                    </table>
-                    <table class="widefat fixed tb-reminder-table" style="margin-top:12px;">
-                        <thead>
-                            <tr>
-                                <th style="width:50px;">On</th>
-                                <th>Hours before booking</th>
-                                <th>Email subject preview</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                        <?php
-                        $reminder_slots = array_replace(
-                            array_fill(0, 3, ['enabled' => false, 'hours' => 24]),
-                            (array) $reminders
-                        );
-                        foreach ($reminder_slots as $i => $rem):
-                            $h   = (int) ($rem['hours'] ?? 24);
-                            $lbl = $h >= 24 ? ($h / 24) . ' day' . ($h >= 48 ? 's' : '') : $h . ' hour' . ($h !== 1 ? 's' : '');
-                        ?>
-                        <tr>
-                            <td><input type="checkbox" name="reminders[<?= $i ?>][enabled]" value="1" class="tb-reminder-toggle" data-idx="<?= $i ?>" <?= !empty($rem['enabled']) ? 'checked' : '' ?>></td>
-                            <td><input type="number" name="reminders[<?= $i ?>][hours]" value="<?= esc_attr($rem['hours'] ?? 24) ?>" min="1" max="720" class="small-text tb-reminder-hours" data-idx="<?= $i ?>"> hours</td>
-                            <td class="tb-reminder-preview" id="tb-rp-<?= $i ?>" style="color:#6b7280;font-size:12px;">"Reminder: Your table at [Restaurant] is <strong><?= esc_html($lbl) ?></strong> away"</td>
-                        </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-
                 <!-- ── Canvas Size ────────────────────────────────────── -->
                 <div class="tb-settings-section">
                     <h2>Floor Plan Canvas</h2>
@@ -826,27 +747,12 @@ class TB_Admin {
             'opening_time','closing_time','slot_duration','sitting_duration','last_booking_offset',
             'min_advance_hours','max_advance_days','max_party_size',
             'canvas_width','canvas_height',
-            'email_from_name','email_footer',
         ];
         foreach ($scalar_keys as $k) {
             if (isset($_POST[$k])) {
                 TB_Database::update_setting($k, sanitize_text_field($_POST[$k]));
             }
         }
-
-        if (!empty($_POST['email_from_address'])) {
-            TB_Database::update_setting('email_from_address', sanitize_email($_POST['email_from_address']));
-        }
-        if (!empty($_POST['admin_email'])) {
-            $admin_emails = implode(',', array_map('sanitize_email', array_map('trim', explode(',', $_POST['admin_email']))));
-            TB_Database::update_setting('admin_email', $admin_emails);
-        }
-
-        TB_Database::update_setting('cancellation_policy', sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));
-
-        TB_Database::update_setting('notify_admin',        isset($_POST['notify_admin'])        ? '1' : '0');
-        TB_Database::update_setting('email_notifications', isset($_POST['email_notifications']) ? '1' : '0');
-        TB_Database::update_setting('reminders_enabled',   isset($_POST['reminders_enabled'])   ? '1' : '0');
 
         if (!empty($_POST['areas']) && is_array($_POST['areas'])) {
             $areas = [];
@@ -861,9 +767,201 @@ class TB_Admin {
             TB_Database::update_setting('areas', wp_json_encode($areas));
         }
 
+        TB_Logger::info('Settings saved', 'system');
+
+        wp_safe_redirect(admin_url('admin.php?page=tb-settings&saved=1'));
+        exit;
+    }
+
+    public function page_emails(): void {
+        if (isset($_GET['saved'])) {
+            echo '<div class="notice notice-success is-dismissible"><p>Email settings saved.</p></div>';
+        }
+
+        $cfg       = TB_Database::get_all_settings();
+        $reminders = json_decode($cfg['reminders'] ?? TB_Reminders::default_config(), true);
+        $logo_id   = (int) ($cfg['email_logo_id']  ?? 0);
+        $logo_url  = $cfg['email_logo_url'] ?? '';
+        ?>
+        <div class="wrap tb-wrap">
+            <h1>Email Settings</h1>
+            <hr class="wp-header-end">
+
+            <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" class="tb-settings-form">
+                <?php wp_nonce_field('tb_save_emails', 'tb_nonce'); ?>
+                <input type="hidden" name="action" value="tb_save_emails">
+
+                <!-- ── Branding ──────────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Branding</h2>
+                    <p class="description">The logo appears in the email header. It is displayed above the restaurant name on a coloured background, so use a version with transparency or white text if possible.</p>
+                    <table class="form-table">
+                        <tr>
+                            <th>Email Logo</th>
+                            <td>
+                                <div class="tb-logo-picker">
+                                    <?php if ($logo_url): ?>
+                                    <div class="tb-logo-preview-wrap" id="tb-logo-preview-wrap">
+                                        <img id="tb-logo-preview" src="<?= esc_url($logo_url) ?>" alt="Logo preview">
+                                    </div>
+                                    <?php else: ?>
+                                    <div class="tb-logo-preview-wrap tb-logo-empty" id="tb-logo-preview-wrap">
+                                        <span>No logo set</span>
+                                    </div>
+                                    <?php endif; ?>
+                                    <input type="hidden" name="email_logo_id"  id="tb-logo-id"  value="<?= esc_attr($logo_id) ?>">
+                                    <input type="hidden" name="email_logo_url" id="tb-logo-url" value="<?= esc_attr($logo_url) ?>">
+                                    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+                                        <button type="button" class="button" id="tb-upload-logo">
+                                            <?= $logo_url ? 'Change Logo' : 'Upload / Select Logo' ?>
+                                        </button>
+                                        <?php if ($logo_url): ?>
+                                        <button type="button" class="button tb-btn-danger" id="tb-remove-logo">Remove</button>
+                                        <?php endif; ?>
+                                    </div>
+                                    <p class="description" style="margin-top:8px;">Recommended: PNG or SVG, transparent background, max 220 × 64 px. Displayed at actual size in email clients.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- ── Delivery ──────────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Delivery</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="e-from-name">From Name</label></th>
+                            <td><input type="text" id="e-from-name" name="email_from_name" value="<?= esc_attr($cfg['email_from_name'] ?? '') ?>" class="regular-text"></td>
+                        </tr>
+                        <tr>
+                            <th><label for="e-from-addr">From Address</label></th>
+                            <td>
+                                <input type="email" id="e-from-addr" name="email_from_address" value="<?= esc_attr($cfg['email_from_address'] ?? '') ?>" class="regular-text">
+                                <p class="description">Must be an authorised sender on your mail server to avoid spam filtering.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- ── Notifications ─────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Notifications</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="e-admin-email">Admin notification address</label></th>
+                            <td>
+                                <input type="email" id="e-admin-email" name="admin_email" value="<?= esc_attr($cfg['admin_email'] ?? get_option('admin_email')) ?>" class="regular-text">
+                                <p class="description">Where new-booking alerts are sent. Separate multiple addresses with commas.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Admin alert</th>
+                            <td><label><input type="checkbox" name="notify_admin" value="1" <?= checked(1, (int)($cfg['notify_admin'] ?? 1)) ?>> Email admin when a new booking is made</label></td>
+                        </tr>
+                        <tr>
+                            <th>Guest confirmation</th>
+                            <td><label><input type="checkbox" name="email_notifications" value="1" <?= checked(1, (int)($cfg['email_notifications'] ?? 1)) ?>> Send confirmation email to guests on booking</label></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- ── Content ───────────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Email Content</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="e-cancel-policy">Cancellation Policy</label></th>
+                            <td>
+                                <textarea id="e-cancel-policy" name="cancellation_policy" rows="3" class="large-text"><?= esc_textarea($cfg['cancellation_policy'] ?? '') ?></textarea>
+                                <p class="description">Shown at the bottom of guest confirmation emails. Leave blank to omit.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th><label for="e-footer">Email Footer Text</label></th>
+                            <td>
+                                <input type="text" id="e-footer" name="email_footer" value="<?= esc_attr($cfg['email_footer'] ?? '') ?>" class="regular-text" placeholder="e.g. 123 High Street, London · 020 7000 0000">
+                                <p class="description">Appears at the bottom of every email. Leave blank to use restaurant name + site URL.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- ── Reminder Emails ────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Reminder Emails</h2>
+                    <p class="description">Sent via WP-Cron (runs hourly). Guests only receive reminders for non-cancelled reservations.</p>
+                    <table class="form-table">
+                        <tr>
+                            <th>Enable reminders</th>
+                            <td><label><input type="checkbox" name="reminders_enabled" value="1" <?= checked(1, (int)($cfg['reminders_enabled'] ?? 1)) ?>> Send automatic reminder emails to guests</label></td>
+                        </tr>
+                    </table>
+                    <table class="widefat fixed tb-reminder-table" style="margin-top:12px;">
+                        <thead>
+                            <tr>
+                                <th style="width:50px;">On</th>
+                                <th>Hours before booking</th>
+                                <th>Subject preview</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php
+                        $reminder_slots = array_replace(
+                            array_fill(0, 3, ['enabled' => false, 'hours' => 24]),
+                            (array) $reminders
+                        );
+                        foreach ($reminder_slots as $i => $rem):
+                            $h   = (int) ($rem['hours'] ?? 24);
+                            $lbl = $h >= 24 ? ($h / 24) . ' day' . ($h >= 48 ? 's' : '') : $h . ' hour' . ($h !== 1 ? 's' : '');
+                        ?>
+                        <tr>
+                            <td><input type="checkbox" name="reminders[<?= $i ?>][enabled]" value="1" data-idx="<?= $i ?>" <?= !empty($rem['enabled']) ? 'checked' : '' ?>></td>
+                            <td><input type="number" name="reminders[<?= $i ?>][hours]" value="<?= esc_attr($rem['hours'] ?? 24) ?>" min="1" max="720" class="small-text tb-reminder-hours" data-idx="<?= $i ?>"> hours</td>
+                            <td class="tb-reminder-preview" id="tb-rp-<?= $i ?>" style="color:#6b7280;font-size:12px;">"Reminder: Your table at [Restaurant] is <strong><?= esc_html($lbl) ?></strong> away"</td>
+                        </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+
+                <?php submit_button('Save Email Settings'); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    public function handle_save_emails(): void {
+        check_admin_referer('tb_save_emails', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        // Logo
+        TB_Database::update_setting('email_logo_id',  (string) (int) ($_POST['email_logo_id']  ?? 0));
+        TB_Database::update_setting('email_logo_url', esc_url_raw($_POST['email_logo_url'] ?? ''));
+
+        // Delivery
+        TB_Database::update_setting('email_from_name', sanitize_text_field($_POST['email_from_name'] ?? ''));
+        if (!empty($_POST['email_from_address'])) {
+            TB_Database::update_setting('email_from_address', sanitize_email($_POST['email_from_address']));
+        }
+
+        // Notifications
+        if (!empty($_POST['admin_email'])) {
+            $admin_emails = implode(',', array_map('sanitize_email', array_map('trim', explode(',', $_POST['admin_email']))));
+            TB_Database::update_setting('admin_email', $admin_emails);
+        }
+        TB_Database::update_setting('notify_admin',        isset($_POST['notify_admin'])        ? '1' : '0');
+        TB_Database::update_setting('email_notifications', isset($_POST['email_notifications']) ? '1' : '0');
+
+        // Content
+        TB_Database::update_setting('cancellation_policy', sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));
+        TB_Database::update_setting('email_footer',        sanitize_text_field($_POST['email_footer'] ?? ''));
+
+        // Reminders
+        TB_Database::update_setting('reminders_enabled', isset($_POST['reminders_enabled']) ? '1' : '0');
         $reminder_rows = [];
         if (!empty($_POST['reminders']) && is_array($_POST['reminders'])) {
-            foreach (array_slice($_POST['reminders'], 0, 3) as $i => $r) {
+            foreach (array_slice($_POST['reminders'], 0, 3) as $r) {
                 $hours   = max(1, min(720, (int) ($r['hours'] ?? 24)));
                 $enabled = !empty($r['enabled']);
                 $label   = $hours >= 24
@@ -876,9 +974,9 @@ class TB_Admin {
             TB_Database::update_setting('reminders', wp_json_encode($reminder_rows));
         }
 
-        TB_Logger::info('Settings saved', 'system');
+        TB_Logger::info('Email settings saved', 'system');
 
-        wp_safe_redirect(admin_url('admin.php?page=tb-settings&saved=1'));
+        wp_safe_redirect(admin_url('admin.php?page=tb-emails&saved=1'));
         exit;
     }
 
@@ -934,9 +1032,12 @@ class TB_Admin {
                             <td>
                                 <label>
                                     <input type="checkbox" name="booking_responsive" value="1" <?= checked($current_responsive, true, false) ?>>
-                                    Adapt the form layout for small screens (&lt; 480 px)
+                                    Fluid layout — form stretches to fill its container
                                 </label>
-                                <p class="description">Disable if your theme already handles responsiveness or you want a fixed-width form.</p>
+                                <p class="description">
+                                    <strong>On:</strong> the form is fluid (<code>width: 100%</code>) and padding/step labels compress on narrow screens.<br>
+                                    <strong>Off:</strong> the form is fixed at 640 px and scrolls horizontally on small screens — useful when your theme controls the layout width.
+                                </p>
                             </td>
                         </tr>
                     </table>

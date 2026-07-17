@@ -460,3 +460,31 @@
 .tb-style-name { font-size: 13px; font-weight: 700; color: #1d2327; }
 .tb-style-desc { font-size: 11px; color: #6b7280; line-height: 1.4; }
 .tb-style-card-site { border-style: dashed; }
+
+/* ------ Logo picker (Emails page) --------------------------- */
+.tb-logo-picker {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+.tb-logo-preview-wrap {
+    width: 240px;
+    height: 80px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f9fafb;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.tb-logo-preview-wrap img {
+    max-width: 220px;
+    max-height: 64px;
+    object-fit: contain;
+    display: block;
+}
+.tb-logo-empty { color: #9ca3af; font-size: 12px; }
+.tb-logo-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

@@ -107,6 +107,9 @@ class TB_Database {
             'booking_mode'         => 'simple',  // 'simple' | 'layout'
             'max_seats'            => '50',
             'sitting_duration'     => '90',       // minutes a party occupies a table/slot
+            // Email branding
+            'email_logo_id'        => '',
+            'email_logo_url'       => '',
             // Styles
             'booking_style'        => 'modern',   // modern|dark|classic|minimal|bold|site
             'booking_responsive'   => '1',

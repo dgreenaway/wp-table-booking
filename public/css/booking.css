@@ -76,6 +76,15 @@
 .tb-step.done { background: var(--tb-success-light); color: var(--tb-success); }
 .tb-step.done span { background: var(--tb-success); color: #fff; }
 
+/* ------ Fixed-width scroll wrapper (non-responsive mode) ---- */
+.tb-booking-outer {
+    overflow-x: auto;
+}
+.tb-booking-wrap.tb-fixed {
+    width: 640px;
+    max-width: none;
+}
+
 /* ------ Form body ------------------------------------------- */
 .tb-form-body {
     background: var(--tb-bg);
@@ -84,10 +93,12 @@
     padding: 28px 32px;
 }
 
+/* Responsive adjustments — skipped automatically in fixed mode
+   because the form is always 640 px wide regardless of viewport */
 @media (max-width: 480px) {
-    .tb-form-body { padding: 20px 16px; }
-    .tb-steps { font-size: 11px; }
-    .tb-step span { display: none; }
+    .tb-booking-wrap:not(.tb-fixed) .tb-form-body { padding: 18px 14px; }
+    .tb-booking-wrap:not(.tb-fixed) .tb-steps     { font-size: 11px; }
+    .tb-booking-wrap:not(.tb-fixed) .tb-step span { display: none; }
 }
 
 .tb-panel h3 {

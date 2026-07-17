@@ -109,6 +109,47 @@
     });
 
     // =========================================================================
+    // Emails page – media library logo picker
+    // =========================================================================
+    var logoFrame;
+
+    $('#tb-upload-logo').on('click', function (e) {
+        e.preventDefault();
+        if (logoFrame) { logoFrame.open(); return; }
+        logoFrame = wp.media({
+            title:    'Select Logo',
+            button:   { text: 'Use this logo' },
+            multiple: false,
+            library:  { type: 'image' },
+        });
+        logoFrame.on('select', function () {
+            var att = logoFrame.state().get('selection').first().toJSON();
+            $('#tb-logo-id').val(att.id);
+            $('#tb-logo-url').val(att.url);
+            $('#tb-logo-preview-wrap')
+                .removeClass('tb-logo-empty')
+                .html('<img id="tb-logo-preview" src="' + att.url + '" alt="Logo preview">');
+            $('#tb-upload-logo').text('Change Logo');
+            if (!$('#tb-remove-logo').length) {
+                $('#tb-upload-logo').after(
+                    ' <button type="button" class="button tb-btn-danger" id="tb-remove-logo">Remove</button>'
+                );
+            }
+        });
+        logoFrame.open();
+    });
+
+    $(document).on('click', '#tb-remove-logo', function () {
+        $('#tb-logo-id').val('');
+        $('#tb-logo-url').val('');
+        $('#tb-logo-preview-wrap')
+            .addClass('tb-logo-empty')
+            .html('<span>No logo set</span>');
+        $('#tb-upload-logo').text('Upload / Select Logo');
+        $(this).remove();
+    });
+
+    // =========================================================================
     // Auto-dismiss notices
     // =========================================================================
     setTimeout(function () {
