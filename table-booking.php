@@ -48,17 +48,150 @@ function tb_boot() {
 add_action('plugins_loaded', 'tb_boot');
 
 function tb_enqueue_frontend() {
-    if (has_shortcode(get_post_field('post_content', get_the_ID()), 'table_booking')) {
+    if (!has_shortcode(get_post_field('post_content', get_the_ID()), 'table_booking')) return;
+
+    $style      = TB_Database::get_setting('booking_style', 'modern');
+    $responsive = (bool) TB_Database::get_setting('booking_responsive', '1');
+
+    if ($style === 'site') {
+        wp_enqueue_style('tb-booking', TB_URL . 'public/css/booking-site.css', [], TB_VERSION);
+    } else {
         wp_enqueue_style('tb-booking', TB_URL . 'public/css/booking.css', [], TB_VERSION);
-        wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
-        wp_localize_script('tb-booking', 'tbData', [
-            'ajaxUrl' => admin_url('admin-ajax.php'),
-            'nonce'   => wp_create_nonce('tb_frontend'),
-            'areas'   => json_decode(TB_Database::get_setting('areas', '[]'), true),
-            'maxParty'=> (int) TB_Database::get_setting('max_party_size', 12),
-            'maxDays' => (int) TB_Database::get_setting('max_advance_days', 60),
-        ]);
+
+        if ($style !== 'modern') {
+            $themes = tb_style_themes();
+            if (!empty($themes[$style]['vars'])) {
+                $css = '.tb-booking-wrap{';
+                foreach ($themes[$style]['vars'] as $prop => $val) {
+                    $css .= $prop . ':' . $val . ';';
+                }
+                $css .= '}';
+                wp_add_inline_style('tb-booking', $css);
+            }
+        }
+
+        if (!$responsive) {
+            wp_add_inline_style('tb-booking',
+                '@media(max-width:480px){' .
+                '.tb-form-body{padding:28px 32px!important}' .
+                '.tb-steps{font-size:12px!important}' .
+                '.tb-step span{display:inline-flex!important;width:20px;height:20px}' .
+                '}'
+            );
+        }
     }
+
+    wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
+    wp_localize_script('tb-booking', 'tbData', [
+        'ajaxUrl'  => admin_url('admin-ajax.php'),
+        'nonce'    => wp_create_nonce('tb_frontend'),
+        'areas'    => json_decode(TB_Database::get_setting('areas', '[]'), true),
+        'maxParty' => (int) TB_Database::get_setting('max_party_size', 12),
+        'maxDays'  => (int) TB_Database::get_setting('max_advance_days', 60),
+    ]);
+}
+
+function tb_style_themes(): array {
+    return [
+        'modern' => [
+            'name'  => 'Modern',
+            'desc'  => 'Clean and professional with blue accents',
+            'vars'  => [],
+        ],
+        'dark' => [
+            'name'  => 'Dark',
+            'desc'  => 'Sleek dark theme for evening venues',
+            'vars'  => [
+                '--tb-primary'        => '#60a5fa',
+                '--tb-primary-hover'  => '#93c5fd',
+                '--tb-primary-light'  => '#1e3a5f',
+                '--tb-primary-ring'   => 'rgba(96,165,250,0.2)',
+                '--tb-success'        => '#4ade80',
+                '--tb-success-light'  => '#052e16',
+                '--tb-success-border' => '#166534',
+                '--tb-success-text'   => '#4ade80',
+                '--tb-bg'             => '#1f2937',
+                '--tb-bg-subtle'      => '#111827',
+                '--tb-bg-muted'       => '#374151',
+                '--tb-border'         => '#374151',
+                '--tb-border-input'   => '#4b5563',
+                '--tb-text'           => '#f9fafb',
+                '--tb-text-secondary' => '#e5e7eb',
+                '--tb-text-muted'     => '#9ca3af',
+                '--tb-text-faint'     => '#6b7280',
+            ],
+        ],
+        'classic' => [
+            'name'  => 'Classic',
+            'desc'  => 'Warm tones with a timeless restaurant feel',
+            'vars'  => [
+                '--tb-primary'        => '#92400e',
+                '--tb-primary-hover'  => '#78350f',
+                '--tb-primary-light'  => '#fffbeb',
+                '--tb-primary-ring'   => 'rgba(146,64,14,0.15)',
+                '--tb-success'        => '#065f46',
+                '--tb-success-light'  => '#f0fdf4',
+                '--tb-success-border' => '#a7f3d0',
+                '--tb-success-text'   => '#065f46',
+                '--tb-bg'             => '#faf9f7',
+                '--tb-bg-subtle'      => '#f5f5f4',
+                '--tb-bg-muted'       => '#e7e5e4',
+                '--tb-border'         => '#d6d3d1',
+                '--tb-border-input'   => '#a8a29e',
+                '--tb-text'           => '#1c1917',
+                '--tb-text-secondary' => '#44403c',
+                '--tb-text-muted'     => '#78716c',
+                '--tb-text-faint'     => '#a8a29e',
+            ],
+        ],
+        'minimal' => [
+            'name'  => 'Minimal',
+            'desc'  => 'Black and white with maximum whitespace',
+            'vars'  => [
+                '--tb-primary'        => '#000000',
+                '--tb-primary-hover'  => '#333333',
+                '--tb-primary-light'  => '#f5f5f5',
+                '--tb-primary-ring'   => 'rgba(0,0,0,0.08)',
+                '--tb-success'        => '#000000',
+                '--tb-success-light'  => '#f5f5f5',
+                '--tb-success-border' => '#d4d4d4',
+                '--tb-success-text'   => '#000000',
+                '--tb-bg'             => '#ffffff',
+                '--tb-bg-subtle'      => '#fafafa',
+                '--tb-bg-muted'       => '#f5f5f5',
+                '--tb-border'         => '#e5e5e5',
+                '--tb-border-input'   => '#d4d4d4',
+                '--tb-text'           => '#000000',
+                '--tb-text-secondary' => '#333333',
+                '--tb-text-muted'     => '#737373',
+                '--tb-text-faint'     => '#a3a3a3',
+                '--tb-radius'         => '2px',
+            ],
+        ],
+        'bold' => [
+            'name'  => 'Bold',
+            'desc'  => 'Vibrant purple with strong visual contrast',
+            'vars'  => [
+                '--tb-primary'        => '#7c3aed',
+                '--tb-primary-hover'  => '#6d28d9',
+                '--tb-primary-light'  => '#ede9fe',
+                '--tb-primary-ring'   => 'rgba(124,58,237,0.15)',
+                '--tb-success'        => '#059669',
+                '--tb-success-light'  => '#ecfdf5',
+                '--tb-success-border' => '#6ee7b7',
+                '--tb-success-text'   => '#065f46',
+                '--tb-bg'             => '#ffffff',
+                '--tb-bg-subtle'      => '#faf5ff',
+                '--tb-bg-muted'       => '#f3f0ff',
+                '--tb-border'         => '#e9d5ff',
+                '--tb-border-input'   => '#d8b4fe',
+                '--tb-text'           => '#1e1b4b',
+                '--tb-text-secondary' => '#312e81',
+                '--tb-text-muted'     => '#6b7280',
+                '--tb-text-faint'     => '#9ca3af',
+            ],
+        ],
+    ];
 }
 
 function tb_render_booking_form() {

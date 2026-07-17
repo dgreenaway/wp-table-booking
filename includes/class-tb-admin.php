@@ -8,6 +8,7 @@ class TB_Admin {
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
         add_action('admin_post_tb_save_reservation',   [$this, 'handle_save_reservation']);
         add_action('admin_post_tb_save_settings',      [$this, 'handle_save_settings']);
+        add_action('admin_post_tb_save_styles',        [$this, 'handle_save_styles']);
         add_action('admin_post_tb_delete_reservation', [$this, 'handle_delete_reservation']);
         add_action('admin_post_tb_clear_logs',         [$this, 'handle_clear_logs']);
     }
@@ -25,6 +26,7 @@ class TB_Admin {
         add_submenu_page('tb-reservations', 'Reservations',   'Reservations',   'manage_options', 'tb-reservations', [$this, 'page_reservations']);
         add_submenu_page('tb-reservations', 'Table Layout',   'Table Layout',   'manage_options', 'tb-layout',       [$this, 'page_layout']);
         add_submenu_page('tb-reservations', 'Settings',       'Settings',       'manage_options', 'tb-settings',     [$this, 'page_settings']);
+        add_submenu_page('tb-reservations', 'Styles',         'Styles',         'manage_options', 'tb-styles',       [$this, 'page_styles']);
         add_submenu_page('tb-reservations', 'Activity Log',   'Activity Log',   'manage_options', 'tb-logs',         [$this, 'page_logs']);
     }
 
@@ -877,6 +879,123 @@ class TB_Admin {
         TB_Logger::info('Settings saved', 'system');
 
         wp_safe_redirect(admin_url('admin.php?page=tb-settings&saved=1'));
+        exit;
+    }
+
+    public function page_styles(): void {
+        if (isset($_GET['saved'])) {
+            echo '<div class="notice notice-success is-dismissible"><p>Style settings saved.</p></div>';
+        }
+
+        $current_style      = TB_Database::get_setting('booking_style', 'modern');
+        $current_responsive = (bool) TB_Database::get_setting('booking_responsive', '1');
+        $themes             = tb_style_themes();
+        ?>
+        <div class="wrap tb-wrap">
+            <h1>Booking Form Styles</h1>
+            <hr class="wp-header-end">
+
+            <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+                <?php wp_nonce_field('tb_save_styles', 'tb_nonce'); ?>
+                <input type="hidden" name="action" value="tb_save_styles">
+
+                <div class="tb-settings-section">
+                    <h2>Theme</h2>
+                    <p class="description">Choose a visual style for the booking form. Changes take effect immediately on the front end.</p>
+                    <div class="tb-style-grid">
+                        <?php foreach ($themes as $key => $theme):
+                            $selected = $current_style === $key;
+                        ?>
+                        <label class="tb-style-card <?= $selected ? 'tb-style-card-selected' : '' ?>">
+                            <input type="radio" name="booking_style" value="<?= esc_attr($key) ?>" <?= checked($selected, true, false) ?>>
+                            <div class="tb-style-preview"><?= $this->render_style_preview($theme) ?></div>
+                            <div class="tb-style-name"><?= esc_html($theme['name']) ?></div>
+                            <div class="tb-style-desc"><?= esc_html($theme['desc']) ?></div>
+                        </label>
+                        <?php endforeach; ?>
+
+                        <label class="tb-style-card tb-style-card-site <?= $current_style === 'site' ? 'tb-style-card-selected' : '' ?>">
+                            <input type="radio" name="booking_style" value="site" <?= checked($current_style, 'site', false) ?>>
+                            <div class="tb-style-preview tb-style-preview-site">
+                                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                                <div style="font-size:10px;color:#6b7280;margin-top:4px;">Theme CSS</div>
+                            </div>
+                            <div class="tb-style-name">Site Styles</div>
+                            <div class="tb-style-desc">Inherit colours and fonts from your active WordPress theme — no plugin CSS loaded</div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="tb-settings-section">
+                    <h2>Responsive Layout</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th>Mobile optimised</th>
+                            <td>
+                                <label>
+                                    <input type="checkbox" name="booking_responsive" value="1" <?= checked($current_responsive, true, false) ?>>
+                                    Adapt the form layout for small screens (&lt; 480 px)
+                                </label>
+                                <p class="description">Disable if your theme already handles responsiveness or you want a fixed-width form.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
+                <?php submit_button('Save Style Settings'); ?>
+            </form>
+        </div>
+        <?php
+    }
+
+    private function render_style_preview(array $theme): string {
+        $d = [
+            '--tb-primary'      => '#2563eb',
+            '--tb-primary-light'=> '#eff6ff',
+            '--tb-bg'           => '#ffffff',
+            '--tb-bg-subtle'    => '#f9fafb',
+            '--tb-border'       => '#e5e7eb',
+            '--tb-border-input' => '#d1d5db',
+            '--tb-text-muted'   => '#6b7280',
+        ];
+        $v  = array_merge($d, $theme['vars'] ?? []);
+        $p  = esc_attr($v['--tb-primary']);
+        $pl = esc_attr($v['--tb-primary-light']);
+        $bg = esc_attr($v['--tb-bg']);
+        $bs = esc_attr($v['--tb-bg-subtle']);
+        $bd = esc_attr($v['--tb-border']);
+        $bi = esc_attr($v['--tb-border-input']);
+        $tm = esc_attr($v['--tb-text-muted']);
+
+        return '<div style="background:' . $bg . ';border:1px solid ' . $bd . ';border-radius:4px;padding:8px;">' .
+                   '<div style="display:flex;gap:2px;margin-bottom:6px;">' .
+                       '<div style="flex:1;background:' . $pl . ';border-radius:2px;padding:3px;font-size:8px;font-weight:700;text-align:center;color:' . $p . ';">1</div>' .
+                       '<div style="flex:1;background:' . $bs . ';border-radius:2px;padding:3px;font-size:8px;text-align:center;color:' . $tm . ';">2</div>' .
+                       '<div style="flex:1;background:' . $bs . ';border-radius:2px;padding:3px;font-size:8px;text-align:center;color:' . $tm . ';">3</div>' .
+                   '</div>' .
+                   '<div style="background:' . $bs . ';border:1px solid ' . $bi . ';border-radius:2px;height:13px;margin-bottom:5px;"></div>' .
+                   '<div style="display:flex;gap:3px;margin-bottom:5px;">' .
+                       '<div style="background:' . $p . ';border-radius:2px;height:11px;flex:1;"></div>' .
+                       '<div style="background:' . $bs . ';border:1px solid ' . $bi . ';border-radius:2px;height:11px;flex:1;"></div>' .
+                       '<div style="background:' . $bs . ';border:1px solid ' . $bi . ';border-radius:2px;height:11px;flex:1;"></div>' .
+                   '</div>' .
+                   '<div style="background:' . $p . ';border-radius:2px;padding:4px;font-size:8px;color:#fff;font-weight:700;text-align:center;">Confirm →</div>' .
+               '</div>';
+    }
+
+    public function handle_save_styles(): void {
+        check_admin_referer('tb_save_styles', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $allowed = ['modern', 'dark', 'classic', 'minimal', 'bold', 'site'];
+        $style   = sanitize_key($_POST['booking_style'] ?? 'modern');
+        if (!in_array($style, $allowed, true)) $style = 'modern';
+
+        TB_Database::update_setting('booking_style',      $style);
+        TB_Database::update_setting('booking_responsive', isset($_POST['booking_responsive']) ? '1' : '0');
+        TB_Logger::info("Booking style set to: $style", 'system');
+
+        wp_safe_redirect(admin_url('admin.php?page=tb-styles&saved=1'));
         exit;
     }
 
