@@ -3,8 +3,9 @@
 Thumbs.db
 desktop.ini
 
-# Editor & local tooling
-.claude/
+# Dotfiles & local tooling
+.*
+!.gitignore
 *.local
 
 # Logs & debug
