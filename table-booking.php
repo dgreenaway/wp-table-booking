@@ -91,11 +91,13 @@ function tb_enqueue_frontend() {
 
     wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
     wp_localize_script('tb-booking', 'tbData', [
-        'ajaxUrl'  => admin_url('admin-ajax.php'),
-        'nonce'    => wp_create_nonce('tb_frontend'),
-        'areas'    => json_decode(TB_Database::get_setting('areas', '[]'), true),
-        'maxParty' => (int) TB_Database::get_setting('max_party_size', 12),
-        'maxDays'  => (int) TB_Database::get_setting('max_advance_days', 60),
+        'ajaxUrl'     => admin_url('admin-ajax.php'),
+        'nonce'       => wp_create_nonce('tb_frontend'),
+        'areas'       => json_decode(TB_Database::get_setting('areas', '[]'), true),
+        'maxParty'    => (int) TB_Database::get_setting('max_party_size', 12),
+        'maxDays'     => (int) TB_Database::get_setting('max_advance_days', 60),
+        'openDays'    => array_map('intval', json_decode(TB_Database::get_setting('open_days', '[0,1,2,3,4,5,6]'), true) ?: [0,1,2,3,4,5,6]),
+        'closedDates' => json_decode(TB_Database::get_setting('closed_dates', '[]'), true) ?: [],
     ]);
 }
 
@@ -315,6 +317,7 @@ function tb_render_booking_form() {
                     <label for="tb-date"><?= esc_html__('Date', 'table-booking') ?></label>
                     <input type="date" id="tb-date" class="tb-input" autocomplete="off"
                            aria-required="true" aria-describedby="tb-error" />
+                    <div id="tb-date-error" style="display:none;margin-top:6px;font-size:13px;color:var(--tb-error);"></div>
                 </div>
                 <div class="tb-field">
                     <label id="tb-area-lbl"><?= esc_html__('Seating Area', 'table-booking') ?></label>

@@ -104,6 +104,52 @@
     });
 
     // =========================================================================
+    // Closed dates manager (Settings page)
+    // =========================================================================
+    var $closedJson = $('#tb-closed-dates-json');
+    if ($closedJson.length) {
+        var closedDates = JSON.parse($closedJson.val() || '[]');
+
+        function renderClosedDates() {
+            var $list = $('#tb-closed-dates-list').empty();
+            if (!closedDates.length) {
+                $list.html('<p class="tb-closed-dates-empty">No closed dates added yet.</p>');
+            } else {
+                closedDates.slice().sort().forEach(function (d) {
+                    var label = new Date(d + 'T12:00:00').toLocaleDateString('en-GB', {
+                        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+                    });
+                    $list.append(
+                        '<div class="tb-closed-date-item">' +
+                        '<span>' + label + '</span>' +
+                        '<button type="button" class="button button-small tb-remove-closed-date" data-date="' + d + '">Remove</button>' +
+                        '</div>'
+                    );
+                });
+            }
+            $closedJson.val(JSON.stringify(closedDates));
+        }
+
+        $('#tb-add-closed-date').on('click', function () {
+            var d = $('#tb-closed-date-picker').val();
+            if (!d) return;
+            if (closedDates.indexOf(d) === -1) {
+                closedDates.push(d);
+                renderClosedDates();
+            }
+            $('#tb-closed-date-picker').val('');
+        });
+
+        $(document).on('click', '.tb-remove-closed-date', function () {
+            var d = $(this).data('date');
+            closedDates = closedDates.filter(function (x) { return x !== d; });
+            renderClosedDates();
+        });
+
+        renderClosedDates();
+    }
+
+    // =========================================================================
     // Log viewer – client-side level + context filter
     // =========================================================================
     $('#tb-log-level, #tb-log-ctx').on('change', function () {

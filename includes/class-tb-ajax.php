@@ -37,6 +37,16 @@ class TB_Ajax {
             wp_send_json_error('Invalid date');
         }
 
+        $open_days    = json_decode(TB_Database::get_setting('open_days',    '[0,1,2,3,4,5,6]'), true);
+        $closed_dates = json_decode(TB_Database::get_setting('closed_dates', '[]'),              true);
+
+        if (!in_array((int) date('w', $ts), (array) $open_days, false)) {
+            wp_send_json_error('The restaurant is closed on this day');
+        }
+        if (in_array($date, (array) $closed_dates, true)) {
+            wp_send_json_error('The restaurant is closed on this date');
+        }
+
         $res   = new TB_Reservations();
         $slots = $res->get_availability($date, $area);
 
@@ -81,10 +91,20 @@ class TB_Ajax {
             wp_send_json_error("Party size must be between 1 and $max_party");
         }
 
-        $min_adv    = (int) TB_Database::get_setting('min_advance_hours', 2) * 3600;
         $booking_ts = strtotime($data['date'] . ' ' . $data['time']);
+        $min_adv    = (int) TB_Database::get_setting('min_advance_hours', 2) * 3600;
         if ($booking_ts < current_time('timestamp') + $min_adv) {
             wp_send_json_error('This time slot is no longer available');
+        }
+
+        $open_days    = json_decode(TB_Database::get_setting('open_days',    '[0,1,2,3,4,5,6]'), true);
+        $closed_dates = json_decode(TB_Database::get_setting('closed_dates', '[]'),              true);
+        $date_ts      = strtotime($data['date']);
+        if (!in_array((int) date('w', $date_ts), (array) $open_days, false)) {
+            wp_send_json_error('The restaurant is closed on this day');
+        }
+        if (in_array($data['date'], (array) $closed_dates, true)) {
+            wp_send_json_error('The restaurant is closed on this date');
         }
 
         // Early availability pre-check for fast UX feedback (create() re-verifies under a lock).

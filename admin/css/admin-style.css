@@ -480,6 +480,25 @@
 .tb-style-desc { font-size: 11px; color: #6b7280; line-height: 1.4; }
 .tb-style-card-site { border-style: dashed; }
 
+/* ------ Closed dates manager -------------------------------- */
+.tb-closed-date-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 12px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    font-size: 13px;
+    max-width: 440px;
+}
+.tb-closed-dates-empty {
+    color: #9ca3af;
+    font-size: 13px;
+    margin: 0;
+}
+
 /* ------ Logo picker (Emails page) --------------------------- */
 .tb-logo-picker {
     display: flex;

@@ -38,8 +38,27 @@
         $date.attr('max', formatDate(maxDate));
 
         $date.on('change', function () {
-            sel.date = $(this).val();
+            const raw = $(this).val();
+            $('#tb-date-error').hide().text('');
+            sel.date = '';
             sel.time = '';
+
+            if (raw) {
+                const d        = new Date(raw + 'T12:00:00');
+                const dow      = d.getDay();
+                const openDays = tbData.openDays    || [0,1,2,3,4,5,6];
+                const closed   = tbData.closedDates || [];
+
+                if (openDays.indexOf(dow) === -1) {
+                    const dayName = d.toLocaleDateString('en-GB', { weekday: 'long' });
+                    $('#tb-date-error').text('We\'re closed on ' + dayName + 's — please choose another date.').show();
+                } else if (closed.indexOf(raw) !== -1) {
+                    $('#tb-date-error').text('We\'re closed on this date — please choose another day.').show();
+                } else {
+                    sel.date = raw;
+                }
+            }
+
             checkStep1();
         });
     }

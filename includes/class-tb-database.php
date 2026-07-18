@@ -124,6 +124,9 @@ class TB_Database {
             'booking_density'         => 'default',
             'booking_stack_buttons'   => '0',
             'booking_steps_mobile'    => 'labels',
+            // Opening schedule
+            'open_days'               => json_encode([0,1,2,3,4,5,6]),
+            'closed_dates'            => json_encode([]),
             // Reminder settings
             'reminders_enabled'       => '1',
             'reminders'               => TB_Reminders::default_config(),

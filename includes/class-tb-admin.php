@@ -578,6 +578,47 @@ class TB_Admin {
                     </table>
                 </div>
 
+                <!-- ── Opening Days & Closures ───────────────────────── -->
+                <?php
+                $open_days    = json_decode($cfg['open_days']    ?? '[0,1,2,3,4,5,6]', true);
+                $closed_dates = $cfg['closed_dates'] ?? '[]';
+                $day_labels   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                $day_order    = [1,2,3,4,5,6,0]; // Mon–Sun display order
+                ?>
+                <div class="tb-settings-section">
+                    <h2>Opening Days &amp; Closures</h2>
+                    <table class="form-table">
+                        <tr>
+                            <th>Open Days</th>
+                            <td>
+                                <div style="display:flex;flex-wrap:wrap;gap:10px 20px;">
+                                <?php foreach ($day_order as $dow): ?>
+                                <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;">
+                                    <input type="checkbox" name="open_days[]" value="<?= $dow ?>"
+                                           <?= in_array($dow, (array)$open_days, false) ? 'checked' : '' ?>>
+                                    <?= $day_labels[$dow] ?>
+                                </label>
+                                <?php endforeach; ?>
+                                </div>
+                                <p class="description" style="margin-top:8px;">Days of the week the restaurant accepts bookings.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Closed Dates</th>
+                            <td>
+                                <input type="hidden" name="closed_dates" id="tb-closed-dates-json"
+                                       value="<?= esc_attr($closed_dates) ?>">
+                                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+                                    <input type="date" id="tb-closed-date-picker" class="tb-filter-input" style="height:30px;">
+                                    <button type="button" class="button" id="tb-add-closed-date">Add Date</button>
+                                </div>
+                                <div id="tb-closed-dates-list"></div>
+                                <p class="description" style="margin-top:8px;">Specific dates the restaurant is closed — bank holidays, private events, etc.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
                 <!-- ── Booking Limits ─────────────────────────────────── -->
                 <div class="tb-settings-section">
                     <h2>Booking Limits</h2>
@@ -792,6 +833,19 @@ class TB_Admin {
                 TB_Database::update_setting($k, sanitize_text_field($_POST[$k]));
             }
         }
+
+        // Open days
+        $open_days_raw = array_map('intval', (array) ($_POST['open_days'] ?? []));
+        $open_days     = array_values(array_filter($open_days_raw, fn($d) => $d >= 0 && $d <= 6));
+        TB_Database::update_setting('open_days', wp_json_encode($open_days));
+
+        // Closed dates
+        $closed_raw   = sanitize_text_field($_POST['closed_dates'] ?? '[]');
+        $closed_arr   = json_decode($closed_raw, true);
+        if (!is_array($closed_arr)) $closed_arr = [];
+        $closed_arr   = array_values(array_filter($closed_arr, fn($d) => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)));
+        sort($closed_arr);
+        TB_Database::update_setting('closed_dates', wp_json_encode($closed_arr));
 
         if (!empty($_POST['areas']) && is_array($_POST['areas'])) {
             $areas = [];
