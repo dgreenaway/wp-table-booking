@@ -1249,6 +1249,29 @@ class TB_Admin {
                             </td>
                         </tr>
                         <tr>
+                            <th scope="row">Usage data</th>
+                            <td>
+                                <?php $tel_status = get_option(TB_Telemetry::OPT_STATUS, 'pending'); ?>
+                                <p style="margin:0 0 8px;">Status: <strong><?= esc_html(TB_Telemetry::get_status_label()) ?></strong></p>
+                                <?php if ($tel_status !== 'opted_out'): ?>
+                                <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
+                                    <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
+                                    <input type="hidden" name="action" value="tb_telemetry">
+                                    <input type="hidden" name="tb_telemetry_choice" value="opted_out">
+                                    <button type="submit" class="button button-secondary button-small">Opt out</button>
+                                </form>
+                                <?php else: ?>
+                                <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
+                                    <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
+                                    <input type="hidden" name="action" value="tb_telemetry">
+                                    <input type="hidden" name="tb_telemetry_choice" value="opted_in">
+                                    <button type="submit" class="button button-secondary button-small">Opt in</button>
+                                </form>
+                                <?php endif; ?>
+                                <p class="description" style="margin-top:8px;">Anonymous data only: plugin version, WP&nbsp;/&nbsp;PHP version, booking mode, table count. No personal data, no site URLs.</p>
+                            </td>
+                        </tr>
+                        <tr>
                             <th scope="row">Remove data on deletion</th>
                             <td>
                                 <label>

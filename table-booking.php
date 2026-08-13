@@ -29,10 +29,12 @@ require_once TB_DIR . 'includes/class-tb-layout.php';
 require_once TB_DIR . 'includes/class-tb-admin.php';
 require_once TB_DIR . 'includes/class-tb-ajax.php';
 require_once TB_DIR . 'includes/class-tb-privacy.php';
+require_once TB_DIR . 'includes/class-tb-telemetry.php';
 
 register_activation_hook(__FILE__, function () {
     TB_Database::install();
     TB_Reminders::activate();
+    TB_Telemetry::on_activation();
     if (!wp_next_scheduled('tb_cleanup_old_reservations')) {
         wp_schedule_event(time(), 'weekly', 'tb_cleanup_old_reservations');
     }
@@ -51,6 +53,7 @@ register_deactivation_hook(__FILE__, function () {
         $ts = wp_next_scheduled($hook);
         if ($ts) wp_unschedule_event($ts, $hook);
     }
+    TB_Telemetry::on_deactivation();
 });
 
 function tb_boot() {
@@ -62,6 +65,7 @@ function tb_boot() {
 
     add_action('tb_cleanup_old_reservations', ['TB_Reservations', 'cleanup_old']);
     add_action('tb_daily_digest',             'tb_send_daily_digest');
+    TB_Telemetry::init();
 
     if (is_admin()) {
         (new TB_Admin())->init();
