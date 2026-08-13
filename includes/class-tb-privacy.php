@@ -21,7 +21,7 @@ class TB_Privacy {
 
     public static function register_exporter(array $exporters): array {
         $exporters['table-booking'] = [
-            'exporter_friendly_name' => __('Table Booking Reservations', 'table-booking'),
+            'exporter_friendly_name' => __('getBooked Reservations', 'table-booking'),
             'callback'               => [__CLASS__, 'export_data'],
         ];
         return $exporters;
@@ -42,7 +42,7 @@ class TB_Privacy {
         foreach ($rows as $row) {
             $items[] = [
                 'group_id'    => 'table-booking-reservations',
-                'group_label' => __('Table Booking Reservations', 'table-booking'),
+                'group_label' => __('getBooked Reservations', 'table-booking'),
                 'item_id'     => 'reservation-' . (int) $row['id'],
                 'data'        => [
                     ['name' => __('Reservation number', 'table-booking'), 'value' => $row['reservation_number']],
@@ -69,7 +69,7 @@ class TB_Privacy {
 
     public static function register_eraser(array $erasers): array {
         $erasers['table-booking'] = [
-            'eraser_friendly_name' => __('Table Booking Reservations', 'table-booking'),
+            'eraser_friendly_name' => __('getBooked Reservations', 'table-booking'),
             'callback'             => [__CLASS__, 'erase_data'],
         ];
         return $erasers;
@@ -124,7 +124,7 @@ class TB_Privacy {
         ) . '</p>';
 
         wp_add_privacy_policy_content(
-            __('Table Booking', 'table-booking'),
+            __('getBooked', 'table-booking'),
             wp_kses_post($content)
         );
     }

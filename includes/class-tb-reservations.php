@@ -140,6 +140,58 @@ class TB_Reservations {
         return $ok;
     }
 
+    /**
+     * Admin-side booking creation — skips availability checks and rate limiting.
+     * $notify controls whether confirmation emails are sent to the guest.
+     */
+    public function admin_create(array $data, bool $notify = true): int|false {
+        global $wpdb;
+
+        $num = $this->generate_number();
+        $status = sanitize_text_field($data['status'] ?? 'pending');
+
+        $row = [
+            'reservation_number' => $num,
+            'customer_name'      => sanitize_text_field($data['customer_name']),
+            'customer_email'     => sanitize_email($data['customer_email']),
+            'customer_phone'     => sanitize_text_field($data['customer_phone'] ?? ''),
+            'reservation_date'   => sanitize_text_field($data['reservation_date']),
+            'reservation_time'   => sanitize_text_field($data['reservation_time']),
+            'party_size'         => max(1, (int) $data['party_size']),
+            'seating_area'       => sanitize_text_field($data['seating_area']),
+            'status'             => $status,
+            'special_requests'   => sanitize_textarea_field($data['special_requests'] ?? ''),
+            'admin_notes'        => sanitize_textarea_field($data['admin_notes']      ?? ''),
+            'created_at'         => current_time('mysql'),
+        ];
+        $fmt = ['%s','%s','%s','%s','%s','%s','%d','%s','%s','%s','%s','%s'];
+
+        if (!empty($data['table_id'])) {
+            $row['table_id'] = (int) $data['table_id'];
+            $fmt[]           = '%d';
+        }
+
+        $ok = $wpdb->insert($this->rtable, $row, $fmt);
+        if (!$ok) {
+            TB_Logger::error('Admin booking insert failed: ' . $wpdb->last_error, 'booking');
+            return false;
+        }
+
+        $id = $wpdb->insert_id;
+        TB_Logger::info("Admin created booking: #{$num} — {$data['customer_name']} on {$row['reservation_date']}", 'booking');
+
+        if ($notify) {
+            if ($status === 'confirmed') {
+                TB_Emails::send_client_status_update($id, 'confirmed');
+            } else {
+                TB_Emails::send_client_confirmation($id);
+            }
+            TB_Emails::send_admin_notification($id);
+        }
+
+        return $id;
+    }
+
     public function delete(int $id): bool {
         global $wpdb;
         return (bool) $wpdb->delete($this->rtable, ['id' => $id], ['%d']);
@@ -215,9 +267,23 @@ class TB_Reservations {
     // -------------------------------------------------------------------------
 
     public function get_availability(string $date, string $area): array {
-        $cfg      = TB_Database::get_all_settings();
-        $opening  = $cfg['opening_time']        ?? '12:00';
-        $closing  = $cfg['closing_time']        ?? '22:00';
+        $cfg    = TB_Database::get_all_settings();
+        $closed = json_decode($cfg['closed_dates'] ?? '[]', true);
+        if (in_array($date, (array) $closed, true)) {
+            return [];
+        }
+
+        // Per-day hours: check the weekly schedule for this specific day of week.
+        $day_key      = strtolower(wp_date('D', strtotime($date)));  // 'mon','tue', etc.
+        $weekly_hours = json_decode($cfg['weekly_hours'] ?? '{}', true);
+        $day_cfg      = $weekly_hours[$day_key] ?? null;
+
+        if ($day_cfg !== null && !$day_cfg['open']) {
+            return [];  // Restaurant closed on this day of week.
+        }
+
+        $opening  = ($day_cfg['from'] ?? null) ?: ($cfg['opening_time'] ?? '12:00');
+        $closing  = ($day_cfg['to']   ?? null) ?: ($cfg['closing_time']  ?? '22:00');
         $slot_dur = (int) ($cfg['slot_duration']       ?? 60);
         $sit_dur  = max(1, (int) ($cfg['sitting_duration'] ?? 90));
         $lbo      = (int) ($cfg['last_booking_offset']  ?? 60);
@@ -232,7 +298,7 @@ class TB_Reservations {
         $slots = [];
         while ($current <= $last) {
             $ts       = $current;
-            $time_str = date('H:i', $ts);
+            $time_str = gmdate('H:i', $ts);
             $end_ts   = $ts + $sit_dur * 60;
 
             if ($ts < $now + $min_adv) {
@@ -245,18 +311,18 @@ class TB_Reservations {
                 $free    = $this->count_free_tables($area, $booked);
                 $slots[] = [
                     'time'      => $time_str,
-                    'label'     => date('g:i A', $ts),
-                    'end_time'  => date('H:i', $end_ts),
-                    'end_label' => date('g:i A', $end_ts),
+                    'label'     => wp_date('g:i A', $ts),
+                    'end_time'  => gmdate('H:i', $end_ts),
+                    'end_label' => wp_date('g:i A', $end_ts),
                     'available' => $free > 0,
                     'tables'    => $free,
                 ];
             } else {
                 $slots[] = [
                     'time'      => $time_str,
-                    'label'     => date('g:i A', $ts),
-                    'end_time'  => date('H:i', $end_ts),
-                    'end_label' => date('g:i A', $end_ts),
+                    'label'     => wp_date('g:i A', $ts),
+                    'end_time'  => gmdate('H:i', $end_ts),
+                    'end_label' => wp_date('g:i A', $end_ts),
                     'available' => $this->has_seat_capacity($date, $time_str, 1, $sit_dur, $cfg),
                 ];
             }

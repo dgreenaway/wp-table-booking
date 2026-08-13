@@ -65,23 +65,23 @@
 
     function initAreaCards() {
         const areas = tbData.areas || [];
-        const $grid = $('#tb-area-grid').empty();
+        const $grid = $('#tb-area-grid').empty().attr('role', 'radiogroup');
         const icons = { dining: '🍽️', bar: '🍹', garden: '🌿' };
 
         areas.forEach(function (a) {
             const icon  = icons[a.id] || '🪑';
             const $card = $('<div class="tb-area-card" tabindex="0">')
-                .attr('data-area', a.id)
+                .attr({ 'data-area': a.id, role: 'radio', 'aria-checked': 'false' })
                 .css('color', a.color)
                 .html(
-                    '<div class="tb-area-card-icon">' + icon + '</div>' +
+                    '<div class="tb-area-card-icon" aria-hidden="true">' + icon + '</div>' +
                     '<div class="tb-area-card-name">' + escHtml(a.label) + '</div>'
                 );
 
             $card.on('click keypress', function (e) {
                 if (e.type === 'keypress' && e.which !== 13) return;
-                $('.tb-area-card').removeClass('selected');
-                $card.addClass('selected');
+                $('.tb-area-card').removeClass('selected').attr('aria-checked', 'false');
+                $card.addClass('selected').attr('aria-checked', 'true');
                 sel.area = a.id;
                 sel.time = '';
                 checkStep1();
@@ -92,7 +92,8 @@
     }
 
     function checkStep1() {
-        $('#tb-step1-next').prop('disabled', !(sel.date && sel.area));
+        const ok = !!(sel.date && sel.area);
+        $('#tb-step1-next').prop('disabled', !ok).attr('aria-disabled', ok ? 'false' : 'true');
     }
 
     // =========================================================================
@@ -122,19 +123,19 @@
                 return;
             }
 
-            const $grid = $('#tb-time-slots').empty();
+            const $grid = $('#tb-time-slots').empty().attr('role', 'radiogroup');
             res.data.forEach(function (slot) {
                 const label = slot.end_label ? slot.label + ' – ' + slot.end_label : slot.label;
                 const $btn  = $('<button type="button" class="tb-time-slot">')
                     .text(label)
-                    .attr('data-time', slot.time);
+                    .attr({ 'data-time': slot.time, role: 'radio', 'aria-checked': 'false' });
 
                 if (!slot.available) {
-                    $btn.addClass('unavailable').prop('disabled', true);
+                    $btn.addClass('unavailable').prop('disabled', true).attr('aria-disabled', 'true');
                 } else {
                     $btn.on('click', function () {
-                        $('.tb-time-slot').removeClass('selected');
-                        $(this).addClass('selected');
+                        $('.tb-time-slot').removeClass('selected').attr('aria-checked', 'false');
+                        $(this).addClass('selected').attr('aria-checked', 'true');
                         sel.time     = slot.time;
                         sel.endLabel = slot.end_label || '';
                         renderPartySelector();
@@ -156,15 +157,18 @@
 
     function renderPartySelector() {
         const max   = tbData.maxParty || 12;
-        const $wrap = $('#tb-party-selector').empty();
+        const $wrap = $('#tb-party-selector').empty().attr('role', 'radiogroup');
 
         for (let i = 1; i <= max; i++) {
-            const $btn = $('<button type="button" class="tb-party-btn">').text(i);
+            const label = i + (i === 1 ? ' guest' : ' guests');
+            const $btn  = $('<button type="button" class="tb-party-btn">')
+                .text(i)
+                .attr({ role: 'radio', 'aria-checked': i === sel.party ? 'true' : 'false', 'aria-label': label });
             if (i === sel.party) $btn.addClass('selected');
 
             $btn.on('click', function () {
-                $('.tb-party-btn').removeClass('selected');
-                $btn.addClass('selected');
+                $('.tb-party-btn').removeClass('selected').attr('aria-checked', 'false');
+                $btn.addClass('selected').attr('aria-checked', 'true');
                 sel.party = i;
                 checkStep2();
             });
@@ -174,7 +178,8 @@
     }
 
     function checkStep2() {
-        $('#tb-step2-next').prop('disabled', !(sel.time && sel.party));
+        const ok = !!(sel.time && sel.party);
+        $('#tb-step2-next').prop('disabled', !ok).attr('aria-disabled', ok ? 'false' : 'true');
     }
 
     // =========================================================================
@@ -216,8 +221,8 @@
     function updateStepIndicator() {
         $('.tb-step').each(function () {
             const s = parseInt($(this).data('step'), 10);
-            $(this).removeClass('active done');
-            if (s === currentStep) $(this).addClass('active');
+            $(this).removeClass('active done').removeAttr('aria-current');
+            if (s === currentStep) $(this).addClass('active').attr('aria-current', 'step');
             if (s < currentStep)  $(this).addClass('done');
         });
     }
@@ -294,10 +299,15 @@
         }, function (res) {
             if (res.success) {
                 const d = res.data;
-                $('#tb-success-msg').text(
-                    'Your table for ' + d.party_size + ' has been reserved on ' +
-                    d.date + ' at ' + d.time + '. A confirmation has been sent to your email.'
-                );
+                const tpl = tbData.successMsg || '';
+                const msg = tpl
+                    ? tpl.replace('{party}', d.party_size)
+                         .replace('{date}',  d.date)
+                         .replace('{time}',  d.time)
+                         .replace('{ref}',   d.reservation_number)
+                    : 'Your table for ' + d.party_size + ' has been reserved on ' +
+                      d.date + ' at ' + d.time + '. A confirmation has been sent to your email.';
+                $('#tb-success-msg').text(msg);
                 $('#tb-success-ref').text(d.reservation_number);
                 $('.tb-step').removeClass('active').addClass('done');
                 $('.tb-panel').hide();

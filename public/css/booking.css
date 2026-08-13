@@ -1,5 +1,5 @@
 /* ============================================================
-   Table Booking – Frontend Booking Form
+   getBooked – Frontend Booking Form
    ============================================================ */
 
 .tb-booking-wrap {
@@ -99,6 +99,10 @@
 .tb-booking-wrap.tb-width-narrow { --tb-max-w: 480px; }
 .tb-booking-wrap.tb-width-wide   { --tb-max-w: 800px; }
 .tb-booking-wrap.tb-width-full   { --tb-max-w: 100%; }
+
+/* ------ UI scale -------------------------------------------- */
+.tb-booking-wrap.tb-scale-125 { zoom: 1.25; }
+.tb-booking-wrap.tb-scale-150 { zoom: 1.5;  }
 
 /* ------ Form body ------------------------------------------- */
 .tb-form-body {

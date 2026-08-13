@@ -1,10 +1,10 @@
 <?php
 /**
- * Plugin Name:       Table Booking
- * Plugin URI:        https://example.com/table-booking
- * Description:       A table reservation system with visual floor plan editor.
+ * Plugin Name:       getBooked
+ * Description:       A complete table reservation system for restaurants — multi-step booking form, floor plan editor, automated emails, and a full admin dashboard.
  * Version:           1.0.0
- * Author:            Table Booking
+ * Author:            Greenaway Digital
+ * Author URI:        https://greenawaydigital.com
  * Text Domain:       table-booking
  * License:           GPL v2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -59,14 +59,34 @@ function tb_boot() {
     }
     (new TB_Ajax())->init();
 
-    add_shortcode('table_booking', 'tb_render_booking_form');
+    add_shortcode('getbooked',     'tb_render_booking_form');
+    add_shortcode('table_booking', 'tb_render_booking_form'); // legacy alias
     add_action('wp_enqueue_scripts', 'tb_enqueue_frontend');
     add_action('template_redirect',  'tb_handle_cancel');
+    add_action('template_redirect',  'tb_handle_ical');
+    add_action('template_redirect',  'tb_handle_admin_confirm');
+    add_action('init',               'tb_register_block');
+}
+
+function tb_register_block(): void {
+    if (!function_exists('register_block_type')) return;
+    wp_register_script(
+        'tb-booking-block',
+        TB_URL . 'blocks/table-booking/index.js',
+        ['wp-blocks', 'wp-element', 'wp-server-side-render'],
+        TB_VERSION,
+        true
+    );
+    register_block_type('table-booking/form', [
+        'editor_script'   => 'tb-booking-block',
+        'render_callback' => 'tb_render_booking_form',
+    ]);
 }
 add_action('plugins_loaded', 'tb_boot');
 
 function tb_enqueue_frontend() {
-    if (!has_shortcode(get_post_field('post_content', get_the_ID()), 'table_booking')) return;
+    $content = get_post_field('post_content', get_the_ID());
+    if (!has_shortcode($content, 'getbooked') && !has_shortcode($content, 'table_booking')) return;
 
     $style = TB_Database::get_setting('booking_style', 'modern');
 
@@ -86,8 +106,16 @@ function tb_enqueue_frontend() {
                 wp_add_inline_style('tb-booking', $css);
             }
         }
-
     }
+
+    // Derive open days (JS convention: 0=Sun … 6=Sat) from weekly_hours setting.
+    $weekly_h  = json_decode(TB_Database::get_setting('weekly_hours', '{}'), true);
+    $js_day_map = ['sun' => 0, 'mon' => 1, 'tue' => 2, 'wed' => 3, 'thu' => 4, 'fri' => 5, 'sat' => 6];
+    $open_days  = [];
+    foreach ($js_day_map as $key => $num) {
+        if (!empty($weekly_h[$key]['open'])) $open_days[] = $num;
+    }
+    if (empty($open_days)) $open_days = [0, 1, 2, 3, 4, 5, 6]; // fallback: all days
 
     wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
     wp_localize_script('tb-booking', 'tbData', [
@@ -96,8 +124,9 @@ function tb_enqueue_frontend() {
         'areas'       => json_decode(TB_Database::get_setting('areas', '[]'), true),
         'maxParty'    => (int) TB_Database::get_setting('max_party_size', 12),
         'maxDays'     => (int) TB_Database::get_setting('max_advance_days', 60),
-        'openDays'    => array_map('intval', json_decode(TB_Database::get_setting('open_days', '[0,1,2,3,4,5,6]'), true) ?: [0,1,2,3,4,5,6]),
+        'openDays'    => $open_days,
         'closedDates' => json_decode(TB_Database::get_setting('closed_dates', '[]'), true) ?: [],
+        'successMsg'  => TB_Database::get_setting('booking_success_message', ''),
     ]);
 }
 
@@ -234,6 +263,7 @@ function tb_handle_cancel(): void {
                     $error = __('We could not cancel your reservation. Please contact us directly.', 'table-booking');
                 } else {
                     TB_Logger::info("Guest cancelled reservation #{$row['reservation_number']} (id:{$id})", 'cancel');
+                    TB_Emails::send_admin_cancellation_notice($id);
                 }
             }
         }
@@ -241,8 +271,8 @@ function tb_handle_cancel(): void {
 
     $success = ($error === '');
     $cfg     = TB_Database::get_all_settings();
-    $name    = $success ? esc_html($row['customer_name']) : '';
-    $ref     = $success ? esc_html($row['reservation_number']) : '';
+    $name    = ($success && isset($row)) ? esc_html($row['customer_name']) : '';
+    $ref     = ($success && isset($row)) ? esc_html($row['reservation_number']) : '';
     $restaurant = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
 
     get_header();
@@ -273,12 +303,131 @@ function tb_handle_cancel(): void {
     exit;
 }
 
+function tb_handle_ical(): void {
+    if (($_GET['tb_action'] ?? '') !== 'ical') return;
+
+    $id  = (int) ($_GET['id']  ?? 0);
+    $tok = sanitize_text_field(wp_unslash($_GET['tok'] ?? ''));
+
+    if (!$id || !$tok) wp_die(esc_html__('Invalid link.', 'table-booking'));
+
+    $res = new TB_Reservations();
+    $row = $res->get($id);
+    if (!$row) wp_die(esc_html__('Reservation not found.', 'table-booking'));
+
+    $expected = hash_hmac('sha256', "ical:{$id}:{$row['reservation_number']}", wp_salt('secure_auth'));
+    if (!hash_equals($expected, $tok)) wp_die(esc_html__('Invalid link.', 'table-booking'));
+
+    $cfg     = TB_Database::get_all_settings();
+    $sit_min = max(1, (int) ($cfg['sitting_duration'] ?? 90));
+
+    // Build floating local times (no UTC offset) — correct for a restaurant slot.
+    $tp      = explode(':', $row['reservation_time']);
+    $h       = (int) $tp[0];
+    $m       = (int) ($tp[1] ?? 0);
+    $end_min = $h * 60 + $m + $sit_min;
+    $date_c  = str_replace('-', '', $row['reservation_date']);
+    $start_t = sprintf('%02d%02d00', $h, $m);
+    $end_t   = sprintf('%02d%02d00', intdiv($end_min, 60) % 24, $end_min % 60);
+
+    $uid        = $row['reservation_number'] . '@' . wp_parse_url(home_url(), PHP_URL_HOST);
+    $restaurant = sanitize_text_field($cfg['restaurant_name'] ?? get_bloginfo('name'));
+    $address    = sanitize_text_field($cfg['restaurant_address'] ?? '');
+    $desc       = 'Reference: ' . $row['reservation_number'] . '\nParty of ' . $row['party_size'];
+    if ($row['special_requests']) {
+        $desc .= '\nRequests: ' . str_replace(["\r\n", "\n"], '\n', $row['special_requests']);
+    }
+
+    $ical = "BEGIN:VCALENDAR\r\n"
+          . "VERSION:2.0\r\n"
+          . "PRODID:-//getBooked//WordPress//EN\r\n"
+          . "CALSCALE:GREGORIAN\r\n"
+          . "METHOD:PUBLISH\r\n"
+          . "BEGIN:VEVENT\r\n"
+          . "UID:{$uid}\r\n"
+          . "DTSTART:{$date_c}T{$start_t}\r\n"
+          . "DTEND:{$date_c}T{$end_t}\r\n"
+          . "SUMMARY:{$restaurant} - Table Reservation\r\n"
+          . "DESCRIPTION:{$desc}\r\n"
+          . ($address ? "LOCATION:{$address}\r\n" : '')
+          . "STATUS:CONFIRMED\r\n"
+          . "END:VEVENT\r\n"
+          . "END:VCALENDAR\r\n";
+
+    header('Content-Type: text/calendar; charset=utf-8');
+    header('Content-Disposition: attachment; filename="booking-' . sanitize_file_name($row['reservation_number']) . '.ics"');
+    header('Cache-Control: no-cache, no-store');
+    echo $ical; // phpcs:ignore WordPress.Security.EscapeOutput
+    exit;
+}
+
+function tb_handle_admin_confirm(): void {
+    if (($_GET['tb_action'] ?? '') !== 'admin_confirm') return;
+
+    $id  = (int) ($_GET['id']  ?? 0);
+    $tok = sanitize_text_field(wp_unslash($_GET['tok'] ?? ''));
+
+    $error = '';
+
+    if (!$id || !$tok) {
+        $error = __('This confirmation link is invalid.', 'table-booking');
+    } else {
+        $res = new TB_Reservations();
+        $row = $res->get($id);
+
+        if (!$row) {
+            $error = __('Reservation not found.', 'table-booking');
+        } else {
+            $expected = hash_hmac('sha256', "admin_confirm:{$id}:{$row['reservation_number']}", wp_salt('secure_auth'));
+            if (!hash_equals($expected, $tok)) {
+                $error = __('This confirmation link is invalid or has expired.', 'table-booking');
+            } elseif ($row['status'] === 'confirmed') {
+                $error = __('This reservation is already confirmed.', 'table-booking');
+            } elseif (in_array($row['status'], ['cancelled', 'completed', 'no_show'], true)) {
+                $error = __('This reservation cannot be confirmed — it has already been closed.', 'table-booking');
+            } else {
+                $res->update($id, ['status' => 'confirmed']);
+                TB_Emails::send_client_status_update($id, 'confirmed');
+                TB_Logger::info("Admin confirmed reservation #{$row['reservation_number']} via email link", 'booking');
+            }
+        }
+    }
+
+    $success   = ($error === '');
+    $ref       = ($success && isset($row)) ? esc_html($row['reservation_number']) : '';
+    $admin_url = admin_url('admin.php?page=tb-reservations' . ($id ? '&view=' . $id : ''));
+
+    get_header();
+    ?>
+    <div style="max-width:560px;margin:60px auto;padding:0 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:40px 36px;text-align:center;">
+        <?php if ($success) : ?>
+          <div style="width:56px;height:56px;border-radius:50%;background:#ecfdf5;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px;color:#059669;">&#10003;</div>
+          <h1 style="margin:0 0 8px;font-size:22px;color:#111827;"><?= esc_html__('Booking Confirmed', 'table-booking') ?></h1>
+          <p style="margin:0 0 20px;color:#6b7280;font-size:15px;">
+            <?= sprintf(esc_html__('Reservation %s has been confirmed and the guest has been notified by email.', 'table-booking'), '<strong>' . $ref . '</strong>') ?>
+          </p>
+          <a href="<?= esc_url($admin_url) ?>" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;"><?= esc_html__('View in Dashboard', 'table-booking') ?></a>
+        <?php else : ?>
+          <div style="width:56px;height:56px;border-radius:50%;background:#fef2f2;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:28px;color:#dc2626;">&#10007;</div>
+          <h1 style="margin:0 0 8px;font-size:22px;color:#111827;"><?= esc_html__('Could Not Confirm', 'table-booking') ?></h1>
+          <p style="margin:0 0 20px;color:#6b7280;font-size:15px;"><?= esc_html($error) ?></p>
+          <a href="<?= esc_url($admin_url) ?>" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:600;"><?= esc_html__('View in Dashboard', 'table-booking') ?></a>
+        <?php endif; ?>
+      </div>
+    </div>
+    <?php
+    get_footer();
+    exit;
+}
+
 function tb_render_booking_form() {
     $responsive    = (bool) TB_Database::get_setting('booking_responsive', '1');
     $form_width    = TB_Database::get_setting('booking_form_width', 'default');
     $density       = TB_Database::get_setting('booking_density', 'default');
     $stack_buttons = (bool) TB_Database::get_setting('booking_stack_buttons', '0');
     $steps_mobile  = TB_Database::get_setting('booking_steps_mobile', 'labels');
+    $ui_scale      = TB_Database::get_setting('booking_ui_scale', '100');
 
     $classes = ['tb-booking-wrap'];
     if (!$responsive)                 $classes[] = 'tb-fixed';
@@ -286,6 +435,7 @@ function tb_render_booking_form() {
     if ($density !== 'default')       $classes[] = 'tb-density-' . $density;
     if ($stack_buttons)               $classes[] = 'tb-stack-btns';
     if ($steps_mobile === 'progress') $classes[] = 'tb-steps-progress';
+    if (in_array($ui_scale, ['125', '150'], true)) $classes[] = 'tb-scale-' . $ui_scale;
 
     $wrap_class = implode(' ', $classes);
 

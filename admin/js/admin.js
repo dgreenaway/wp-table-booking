@@ -204,6 +204,36 @@
     });
 
     // =========================================================================
+    // Bulk actions – select-all checkbox + count label
+    // =========================================================================
+    $('#tb-check-all').on('change', function () {
+        $('.tb-row-check').prop('checked', this.checked);
+        updateBulkCount();
+    });
+
+    $(document).on('change', '.tb-row-check', function () {
+        const total   = $('.tb-row-check').length;
+        const checked = $('.tb-row-check:checked').length;
+        $('#tb-check-all').prop('indeterminate', checked > 0 && checked < total);
+        $('#tb-check-all').prop('checked', checked === total);
+        updateBulkCount();
+    });
+
+    function updateBulkCount() {
+        const n = $('.tb-row-check:checked').length;
+        $('#tb-bulk-count').text(n > 0 ? n + ' selected' : '');
+    }
+
+    $('#tb-bulk-form').on('submit', function (e) {
+        const action  = $('#tb-bulk-action').val();
+        const checked = $('.tb-row-check:checked').length;
+        if (!action || !checked) { e.preventDefault(); return; }
+        if (action === 'delete' && !confirm('Delete ' + checked + ' reservation(s)? This cannot be undone.')) {
+            e.preventDefault();
+        }
+    });
+
+    // =========================================================================
     // Auto-dismiss notices
     // =========================================================================
     setTimeout(function () {

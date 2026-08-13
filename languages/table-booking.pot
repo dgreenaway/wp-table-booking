@@ -1,0 +1,215 @@
+# Copyright (C) 2024 Greenaway Digital
+# This file is distributed under the GPL v2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: getBooked 1.0.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/getbooked\n"
+"POT-Creation-Date: 2024-01-01T00:00:00+00:00\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"X-Generator: WP-CLI 2.x\n"
+"X-Domain: table-booking\n"
+
+#. Plugin Name of the plugin
+msgid "getBooked"
+msgstr ""
+
+#. Description of the plugin
+msgid "A complete table reservation system for restaurants — multi-step booking form, floor plan editor, automated emails, and a full admin dashboard."
+msgstr ""
+
+#. Author of the plugin
+msgid "Greenaway Digital"
+msgstr ""
+
+#: table-booking.php
+msgid "Booking progress"
+msgstr ""
+
+#: table-booking.php
+msgid "Date &amp; Area"
+msgstr ""
+
+#: table-booking.php
+msgid "Time &amp; Size"
+msgstr ""
+
+#: table-booking.php
+msgid "Your Details"
+msgstr ""
+
+#: table-booking.php
+msgid "Confirm"
+msgstr ""
+
+#: table-booking.php
+msgid "Leave this field empty"
+msgstr ""
+
+#: table-booking.php
+msgid "When & Where?"
+msgstr ""
+
+#: table-booking.php
+msgid "Date"
+msgstr ""
+
+#: table-booking.php
+msgid "Seating Area"
+msgstr ""
+
+#: table-booking.php
+msgid "See Available Times"
+msgstr ""
+
+#: table-booking.php
+msgid "Choose a Time & Party Size"
+msgstr ""
+
+#: table-booking.php
+msgid "Loading available times…"
+msgstr ""
+
+#: table-booking.php
+msgid "Available Times"
+msgstr ""
+
+#: table-booking.php
+msgid "Party Size"
+msgstr ""
+
+#: table-booking.php
+msgid "Back"
+msgstr ""
+
+#: table-booking.php
+msgid "Next"
+msgstr ""
+
+#: table-booking.php
+msgid "Your Details"
+msgstr ""
+
+#: table-booking.php
+msgid "Full Name"
+msgstr ""
+
+#: table-booking.php
+msgid "Jane Smith"
+msgstr ""
+
+#: table-booking.php
+msgid "Email Address"
+msgstr ""
+
+#: table-booking.php
+msgid "jane@example.com"
+msgstr ""
+
+#: table-booking.php
+msgid "Phone Number"
+msgstr ""
+
+#: table-booking.php
+msgid "e.g. +44 7700 900000"
+msgstr ""
+
+#: table-booking.php
+msgid "Special Requests"
+msgstr ""
+
+#: table-booking.php
+msgid "Allergies, high chair, anniversary, etc."
+msgstr ""
+
+#: table-booking.php
+msgid "Review"
+msgstr ""
+
+#: table-booking.php
+msgid "Review Your Booking"
+msgstr ""
+
+#: table-booking.php
+msgid "Confirm Booking"
+msgstr ""
+
+#: table-booking.php
+msgid "Booking Confirmed!"
+msgstr ""
+
+#: table-booking.php
+msgid "This cancellation link is invalid."
+msgstr ""
+
+#: table-booking.php
+msgid "Reservation not found."
+msgstr ""
+
+#: table-booking.php
+msgid "This cancellation link is invalid or has expired."
+msgstr ""
+
+#: table-booking.php
+msgid "This reservation has already been cancelled or completed."
+msgstr ""
+
+#: table-booking.php
+msgid "Your reservation is already in progress and cannot be cancelled online."
+msgstr ""
+
+#: table-booking.php
+msgid "We could not cancel your reservation. Please contact us directly."
+msgstr ""
+
+#: table-booking.php
+msgid "Reservation Cancelled"
+msgstr ""
+
+#: table-booking.php
+msgid "Hi %1$s, your reservation %2$s at %3$s has been cancelled. We hope to see you another time."
+msgstr ""
+
+#: table-booking.php
+msgid "No further action is needed."
+msgstr ""
+
+#: table-booking.php
+msgid "Unable to Cancel"
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Invalid submission."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Too many booking attempts. Please wait a few minutes and try again."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Sorry, no tables are available for your selection. Please choose a different time or area."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Sorry, we're fully booked for that time slot. Please choose a different time."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Sorry, that time slot just filled up. Please choose a different time."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Sorry, no tables are available. Please choose a different time or area."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "The system is busy processing another booking. Please try again in a moment."
+msgstr ""
+
+#: includes/class-tb-ajax.php
+msgid "Could not save your reservation. Please try again."
+msgstr ""

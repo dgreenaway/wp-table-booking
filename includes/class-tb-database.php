@@ -90,6 +90,15 @@ class TB_Database {
             'restaurant_address'  => '',
             'opening_time'        => '12:00',
             'closing_time'        => '22:00',
+            'weekly_hours'        => json_encode([
+                'mon' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'tue' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'wed' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'thu' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'fri' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'sat' => ['open' => true,  'from' => '12:00', 'to' => '22:00'],
+                'sun' => ['open' => false, 'from' => '12:00', 'to' => '22:00'],
+            ]),
             'slot_duration'       => '60',
             'last_booking_offset' => '60',
             'min_advance_hours'   => '2',
@@ -124,12 +133,14 @@ class TB_Database {
             'booking_density'         => 'default',
             'booking_stack_buttons'   => '0',
             'booking_steps_mobile'    => 'labels',
-            // Opening schedule
-            'open_days'               => json_encode([0,1,2,3,4,5,6]),
-            'closed_dates'            => json_encode([]),
+            'booking_ui_scale'        => '100',
             // Reminder settings
             'reminders_enabled'       => '1',
             'reminders'               => TB_Reminders::default_config(),
+            // Availability
+            'closed_dates'             => '[]',
+            // Booking form
+            'booking_success_message'  => '',
             // Data & privacy
             'delete_data_on_uninstall' => '0',
             'data_retention_days'      => '0',

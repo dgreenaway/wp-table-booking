@@ -12,13 +12,18 @@ class TB_Admin {
         add_action('admin_post_tb_save_styles',        [$this, 'handle_save_styles']);
         add_action('admin_post_tb_delete_reservation', [$this, 'handle_delete_reservation']);
         add_action('admin_post_tb_clear_logs',         [$this, 'handle_clear_logs']);
+        add_action('admin_post_tb_export_settings',    [$this, 'handle_export_settings']);
+        add_action('admin_post_tb_import_settings',    [$this, 'handle_import_settings']);
+        add_action('admin_post_tb_export_csv',         [$this, 'handle_export_csv']);
+        add_action('admin_post_tb_create_reservation', [$this, 'handle_create_reservation']);
+        add_action('admin_post_tb_bulk_action',        [$this, 'handle_bulk_action']);
         add_action('admin_footer-plugins.php',         [$this, 'deactivation_modal']);
     }
 
     public function register_menu(): void {
         add_menu_page(
-            'Table Booking',
-            'Table Booking',
+            'getBooked',
+            'getBooked',
             'manage_options',
             'tb-reservations',
             [$this, 'page_reservations'],
@@ -97,15 +102,35 @@ class TB_Admin {
         $pages = ceil($total / $per_page);
 
         $status_options = ['pending' => 'Pending','confirmed' => 'Confirmed','seated' => 'Seated','completed' => 'Completed','cancelled' => 'Cancelled','no_show' => 'No Show'];
-        $detail_id = isset($_GET['view']) ? (int) $_GET['view'] : 0;
+        $view = sanitize_text_field($_GET['view'] ?? '');
+
+        if (!empty($_GET['print'])) {
+            $print_date = sanitize_text_field($_GET['date'] ?? wp_date('Y-m-d'));
+            $this->render_print_view($print_date, $areas, $status_options);
+            return;
+        }
+
+        if ($view === 'new') {
+            $this->render_new_reservation_form($areas, $status_options);
+            return;
+        }
+
+        $detail_id = is_numeric($view) ? (int) $view : 0;
 
         if ($detail_id) {
             $this->render_reservation_detail($detail_id, $areas, $status_options);
             return;
         }
         ?>
+        <?php if (isset($_GET['created'])): ?>
+        <div class="notice notice-success is-dismissible"><p>Reservation created successfully.</p></div>
+        <?php endif; ?>
+        <?php if (!empty($_GET['bulk_done'])): ?>
+        <div class="notice notice-success is-dismissible"><p><?= esc_html((int) $_GET['bulk_done']) ?> reservation(s) updated.</p></div>
+        <?php endif; ?>
         <div class="wrap tb-wrap">
-            <h1 class="wp-heading-inline">Table Booking</h1>
+            <h1 class="wp-heading-inline">getBooked</h1>
+            <a href="<?= esc_url(admin_url('admin.php?page=tb-reservations&view=new')) ?>" class="page-title-action">Add Reservation</a>
             <?php if ($mode === 'simple'): ?>
             <span class="tb-mode-badge tb-mode-simple">Simple mode &mdash; <?= esc_html($cfg['max_seats'] ?? 50) ?> covers/slot</span>
             <?php else: ?>
@@ -146,58 +171,95 @@ class TB_Admin {
                 <input type="search" name="s" value="<?= esc_attr($filter_search) ?>" placeholder="Search name / email…" class="tb-filter-input">
                 <button type="submit" class="button button-primary">Filter</button>
                 <a href="?page=tb-reservations" class="button">Clear</a>
+                <?php
+                $export_url = add_query_arg([
+                    'action'   => 'tb_export_csv',
+                    'date'     => $filter_date,
+                    'status'   => $filter_status,
+                    'area'     => $filter_area,
+                    's'        => $filter_search,
+                    'tb_nonce' => wp_create_nonce('tb_export_csv'),
+                ], admin_url('admin-post.php'));
+                ?>
+                <a href="<?= esc_url($export_url) ?>" class="button" style="margin-left:auto;">Export CSV</a>
+                <?php
+                $print_url = add_query_arg([
+                    'page'  => 'tb-reservations',
+                    'print' => '1',
+                    'date'  => $filter_date ?: wp_date('Y-m-d'),
+                ], admin_url('admin.php'));
+                ?>
+                <a href="<?= esc_url($print_url) ?>" class="button" target="_blank">Print Run Sheet</a>
             </form>
 
             <?php if (empty($rows)): ?>
             <div class="tb-empty">No reservations found.</div>
             <?php else: ?>
             <?php $sit_dur = (int) ($cfg['sitting_duration'] ?? 90); ?>
-            <table class="wp-list-table widefat fixed striped tb-table">
-                <thead>
+            <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" id="tb-bulk-form">
+                <?php wp_nonce_field('tb_bulk_action', 'tb_nonce'); ?>
+                <input type="hidden" name="action" value="tb_bulk_action">
+
+                <div class="tablenav top" style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+                    <select name="bulk_action" id="tb-bulk-action">
+                        <option value="">— Bulk Actions —</option>
+                        <option value="confirm">Confirm</option>
+                        <option value="cancel">Cancel</option>
+                        <option value="delete">Delete</option>
+                    </select>
+                    <button type="submit" class="button" id="tb-bulk-apply">Apply</button>
+                    <span id="tb-bulk-count" style="color:#6b7280;font-size:13px;"></span>
+                </div>
+
+                <table class="wp-list-table widefat fixed striped tb-table">
+                    <thead>
+                        <tr>
+                            <th style="width:32px;"><input type="checkbox" id="tb-check-all" title="Select all"></th>
+                            <th style="width:130px">Reference</th>
+                            <th>Name</th>
+                            <th>Date</th>
+                            <th>Time &rarr; Until</th>
+                            <th>Party</th>
+                            <th>Area</th>
+                            <th>Table</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($rows as $row):
+                        $area_lbl   = $row['seating_area'];
+                        foreach ($areas as $a) { if ($a['id'] === $row['seating_area']) { $area_lbl = $a['label']; break; } }
+                        $detail_url = add_query_arg(['page' => 'tb-reservations', 'view' => $row['id']], admin_url('admin.php'));
+                        $start_ts   = strtotime($row['reservation_time']);
+                        $end_ts     = $start_ts + $sit_dur * 60;
+                    ?>
                     <tr>
-                        <th style="width:130px">Reference</th>
-                        <th>Name</th>
-                        <th>Date</th>
-                        <th>Time &rarr; Until</th>
-                        <th>Party</th>
-                        <th>Area</th>
-                        <th>Table</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <td><input type="checkbox" name="bulk_ids[]" value="<?= esc_attr($row['id']) ?>" class="tb-row-check"></td>
+                        <td><code><?= esc_html($row['reservation_number']) ?></code></td>
+                        <td><?= esc_html($row['customer_name']) ?></td>
+                        <td><?= esc_html(wp_date('d M Y', strtotime($row['reservation_date']))) ?></td>
+                        <td>
+                            <?= esc_html(wp_date('g:i A', $start_ts)) ?>
+                            <span class="tb-until">&rarr; <?= esc_html(wp_date('g:i A', $end_ts)) ?></span>
+                        </td>
+                        <td><?= esc_html($row['party_size']) ?></td>
+                        <td><?= esc_html($area_lbl) ?></td>
+                        <td><?= esc_html($row['table_name'] ?? '—') ?></td>
+                        <td><span class="tb-badge tb-badge-<?= esc_attr($row['status']) ?>"><?= esc_html($status_options[$row['status']] ?? $row['status']) ?></span></td>
+                        <td>
+                            <a href="<?= esc_url($detail_url) ?>" class="button button-small">View</a>
+                            <button class="button button-small tb-status-btn"
+                                    data-id="<?= esc_attr($row['id']) ?>"
+                                    data-status="<?= esc_attr($row['status']) ?>">
+                                <?= $row['status'] === 'pending' ? 'Confirm' : 'Update' ?>
+                            </button>
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                <?php foreach ($rows as $row):
-                    $area_lbl   = $row['seating_area'];
-                    foreach ($areas as $a) { if ($a['id'] === $row['seating_area']) { $area_lbl = $a['label']; break; } }
-                    $detail_url = add_query_arg(['page' => 'tb-reservations', 'view' => $row['id']], admin_url('admin.php'));
-                    $start_ts   = strtotime($row['reservation_time']);
-                    $end_ts     = $start_ts + $sit_dur * 60;
-                ?>
-                <tr>
-                    <td><code><?= esc_html($row['reservation_number']) ?></code></td>
-                    <td><?= esc_html($row['customer_name']) ?></td>
-                    <td><?= esc_html(date('d M Y', strtotime($row['reservation_date']))) ?></td>
-                    <td>
-                        <?= esc_html(date('g:i A', $start_ts)) ?>
-                        <span class="tb-until">&rarr; <?= esc_html(date('g:i A', $end_ts)) ?></span>
-                    </td>
-                    <td><?= esc_html($row['party_size']) ?></td>
-                    <td><?= esc_html($area_lbl) ?></td>
-                    <td><?= esc_html($row['table_name'] ?? '—') ?></td>
-                    <td><span class="tb-badge tb-badge-<?= esc_attr($row['status']) ?>"><?= esc_html($status_options[$row['status']] ?? $row['status']) ?></span></td>
-                    <td>
-                        <a href="<?= esc_url($detail_url) ?>" class="button button-small">View</a>
-                        <button class="button button-small tb-status-btn"
-                                data-id="<?= esc_attr($row['id']) ?>"
-                                data-status="<?= esc_attr($row['status']) ?>">
-                            <?= $row['status'] === 'pending' ? 'Confirm' : 'Update' ?>
-                        </button>
-                    </td>
-                </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </form>
 
             <?php if ($pages > 1): ?>
             <div class="tb-pagination">
@@ -222,6 +284,119 @@ class TB_Admin {
                 <div class="tb-modal-actions">
                     <button class="button button-primary" id="tb-modal-save">Save</button>
                     <button class="button" id="tb-modal-cancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    private function render_new_reservation_form(array $areas, array $status_options): void {
+        $cfg     = TB_Database::get_all_settings();
+        $layout  = new TB_Layout();
+        $back    = admin_url('admin.php?page=tb-reservations');
+        $opening = $cfg['opening_time'] ?? '12:00';
+        ?>
+        <div class="wrap tb-wrap">
+            <h1><a href="<?= esc_url($back) ?>" class="tb-back">&larr;</a> New Reservation</h1>
+            <hr class="wp-header-end">
+
+            <div class="tb-detail-grid" style="max-width:640px;">
+                <div class="tb-detail-card" style="grid-column:1/-1;">
+                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+                        <?php wp_nonce_field('tb_create_reservation', 'tb_nonce'); ?>
+                        <input type="hidden" name="action" value="tb_create_reservation">
+
+                        <h3 style="margin-top:0;">Reservation Details</h3>
+                        <table class="form-table" style="margin-top:0;">
+                            <tr>
+                                <th><label for="nr-date">Date <span style="color:#dc2626;">*</span></label></th>
+                                <td><input type="date" id="nr-date" name="reservation_date" required class="tb-admin-input"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-time">Time <span style="color:#dc2626;">*</span></label></th>
+                                <td>
+                                    <input type="time" id="nr-time" name="reservation_time" value="<?= esc_attr($opening) ?>" required class="tb-admin-input">
+                                    <p class="description">Use 24-hour format, e.g. 19:30</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-area">Seating Area <span style="color:#dc2626;">*</span></label></th>
+                                <td>
+                                    <select id="nr-area" name="seating_area" required class="tb-admin-input">
+                                        <?php foreach ($areas as $a): ?>
+                                        <option value="<?= esc_attr($a['id']) ?>"><?= esc_html($a['label']) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-party">Party Size <span style="color:#dc2626;">*</span></label></th>
+                                <td><input type="number" id="nr-party" name="party_size" value="2" min="1" max="100" required class="tb-admin-input" style="width:80px;"></td>
+                            </tr>
+                            <?php if (($cfg['booking_mode'] ?? 'simple') === 'layout'): ?>
+                            <tr>
+                                <th><label for="nr-table">Assign Table</label></th>
+                                <td>
+                                    <select id="nr-table" name="table_id" class="tb-admin-input">
+                                        <option value="">— Auto / Unassigned —</option>
+                                        <?php foreach ($layout->get_all() as $t): ?>
+                                        <option value="<?= esc_attr($t['id']) ?>"><?= esc_html($t['table_name']) ?> (cap. <?= esc_html($t['capacity']) ?>)</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                            </tr>
+                            <?php endif; ?>
+                            <tr>
+                                <th><label for="nr-status">Status</label></th>
+                                <td>
+                                    <select id="nr-status" name="status" class="tb-admin-input">
+                                        <?php foreach ($status_options as $v => $l): ?>
+                                        <option value="<?= esc_attr($v) ?>" <?= selected($v, 'confirmed', false) ?>><?= esc_html($l) ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <h3>Guest Information</h3>
+                        <table class="form-table" style="margin-top:0;">
+                            <tr>
+                                <th><label for="nr-name">Full Name <span style="color:#dc2626;">*</span></label></th>
+                                <td><input type="text" id="nr-name" name="customer_name" required class="regular-text tb-admin-input" autocomplete="off"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-email">Email</label></th>
+                                <td><input type="email" id="nr-email" name="customer_email" class="regular-text tb-admin-input" autocomplete="off"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-phone">Phone</label></th>
+                                <td><input type="tel" id="nr-phone" name="customer_phone" class="regular-text tb-admin-input"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-requests">Special Requests</label></th>
+                                <td><textarea id="nr-requests" name="special_requests" rows="3" class="large-text tb-admin-input"></textarea></td>
+                            </tr>
+                            <tr>
+                                <th><label for="nr-notes">Admin Notes</label></th>
+                                <td><textarea id="nr-notes" name="admin_notes" rows="2" class="large-text tb-admin-input"></textarea></td>
+                            </tr>
+                            <tr>
+                                <th>Notify Guest</th>
+                                <td>
+                                    <label>
+                                        <input type="checkbox" name="notify_guest" value="1" checked>
+                                        Send confirmation email to guest
+                                    </label>
+                                    <p class="description">Unchecked for phone bookings where the guest doesn't need an email.</p>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <p class="submit">
+                            <button type="submit" class="button button-primary">Create Reservation</button>
+                            <a href="<?= esc_url($back) ?>" class="button" style="margin-left:6px;">Cancel</a>
+                        </p>
+                    </form>
                 </div>
             </div>
         </div>
@@ -258,17 +433,17 @@ class TB_Admin {
 
                     <h3>Reservation Details</h3>
                     <table class="tb-detail-table">
-                        <tr><th>Date</th><td><?= esc_html(date('l, F j, Y', strtotime($row['reservation_date']))) ?></td></tr>
+                        <tr><th>Date</th><td><?= esc_html(wp_date('l, F j, Y', strtotime($row['reservation_date']))) ?></td></tr>
                         <?php
                             $sit_min  = (int) TB_Database::get_setting('sitting_duration', '90');
-                            $end_time = date('g:i A', strtotime($row['reservation_time']) + $sit_min * 60);
+                            $end_time = wp_date('g:i A', strtotime($row['reservation_time']) + $sit_min * 60);
                         ?>
-                        <tr><th>Time</th><td><?= esc_html(date('g:i A', strtotime($row['reservation_time']))) ?> &rarr; <?= esc_html($end_time) ?> <span style="color:#9ca3af;font-size:11px;">(<?= esc_html($sit_min) ?> min sitting)</span></td></tr>
+                        <tr><th>Time</th><td><?= esc_html(wp_date('g:i A', strtotime($row['reservation_time']))) ?> &rarr; <?= esc_html($end_time) ?> <span style="color:#9ca3af;font-size:11px;">(<?= esc_html($sit_min) ?> min sitting)</span></td></tr>
                         <tr><th>Party</th><td><?= esc_html($row['party_size']) ?> guests</td></tr>
                         <tr><th>Area</th><td><?= esc_html($area_lbl) ?></td></tr>
                         <tr><th>Table</th><td><?= esc_html($row['table_name'] ?? 'Unassigned') ?></td></tr>
                         <tr><th>Status</th><td><span class="tb-badge tb-badge-<?= esc_attr($row['status']) ?>"><?= esc_html($status_options[$row['status']] ?? $row['status']) ?></span></td></tr>
-                        <tr><th>Booked</th><td><?= esc_html(date('d M Y H:i', strtotime($row['created_at']))) ?></td></tr>
+                        <tr><th>Booked</th><td><?= esc_html(wp_date('d M Y H:i', strtotime($row['created_at']))) ?></td></tr>
                     </table>
 
                     <?php if (!empty($row['special_requests'])): ?>
@@ -473,7 +648,7 @@ class TB_Admin {
         }
         ?>
         <div class="wrap tb-wrap">
-            <h1>Table Booking Settings</h1>
+            <h1>getBooked Settings</h1>
             <hr class="wp-header-end">
 
             <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" class="tb-settings-form">
@@ -532,17 +707,52 @@ class TB_Admin {
                 </div>
 
                 <!-- ── Booking Hours ──────────────────────────────────── -->
+                <?php
+                $weekly_hours_raw = $cfg['weekly_hours'] ?? '{}';
+                $weekly_hours     = json_decode($weekly_hours_raw, true);
+                $days = [
+                    'mon' => 'Monday',    'tue' => 'Tuesday',  'wed' => 'Wednesday',
+                    'thu' => 'Thursday',  'fri' => 'Friday',   'sat' => 'Saturday',
+                    'sun' => 'Sunday',
+                ];
+                $default_open  = $cfg['opening_time'] ?? '12:00';
+                $default_close = $cfg['closing_time']  ?? '22:00';
+                ?>
                 <div class="tb-settings-section">
-                    <h2>Booking Hours</h2>
+                    <h2>Opening Hours</h2>
+                    <p class="description">Set the days and hours guests can make bookings. Closed days will show no available times.</p>
                     <table class="form-table">
+                        <?php foreach ($days as $key => $label):
+                            $day_cfg = $weekly_hours[$key] ?? ['open' => true, 'from' => $default_open, 'to' => $default_close];
+                            $is_open = !empty($day_cfg['open']);
+                            $from    = $day_cfg['from'] ?? $default_open;
+                            $to      = $day_cfg['to']   ?? $default_close;
+                        ?>
                         <tr>
-                            <th><label for="s-open">Opening Time</label></th>
-                            <td><input type="time" id="s-open" name="opening_time" value="<?= esc_attr($cfg['opening_time'] ?? '12:00') ?>"></td>
+                            <th style="width:130px;"><?= esc_html($label) ?></th>
+                            <td>
+                                <label style="margin-right:16px;">
+                                    <input type="checkbox" name="weekly_hours[<?= esc_attr($key) ?>][open]" value="1"
+                                        <?= checked($is_open, true, false) ?>> Open
+                                </label>
+                                <label>From
+                                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][from]"
+                                        value="<?= esc_attr($from) ?>" style="margin-left:6px;margin-right:10px;">
+                                </label>
+                                <label>To
+                                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][to]"
+                                        value="<?= esc_attr($to) ?>" style="margin-left:6px;">
+                                </label>
+                            </td>
                         </tr>
-                        <tr>
-                            <th><label for="s-close">Closing Time</label></th>
-                            <td><input type="time" id="s-close" name="closing_time" value="<?= esc_attr($cfg['closing_time'] ?? '22:00') ?>"></td>
-                        </tr>
+                        <?php endforeach; ?>
+                    </table>
+                </div>
+
+                <!-- ── Slot Settings ─────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Slot Settings</h2>
+                    <table class="form-table">
                         <tr>
                             <th><label for="s-dur">Slot Duration</label></th>
                             <td>
@@ -638,6 +848,49 @@ class TB_Admin {
                     </table>
                 </div>
 
+                <!-- ── Closed Dates ──────────────────────────────────── -->
+                <?php $closed_dates = json_decode($cfg['closed_dates'] ?? '[]', true); ?>
+                <div class="tb-settings-section">
+                    <h2>Closed Dates</h2>
+                    <p class="description">Mark specific dates as unavailable. The booking form will show no time slots on these days.</p>
+                    <input type="hidden" name="closed_dates" id="tb-closed-dates-json" value="<?= esc_attr(wp_json_encode((array) $closed_dates)) ?>">
+                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                        <input type="date" id="tb-closed-date-picker" class="tb-admin-input" style="width:180px;">
+                        <button type="button" class="button" id="tb-add-closed-date">Add Date</button>
+                    </div>
+                    <div id="tb-closed-dates-list" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px;"></div>
+                </div>
+                <script>
+                (function () {
+                    var dates = <?= wp_json_encode(array_values((array) $closed_dates)) ?>;
+                    function render() {
+                        var el = document.getElementById('tb-closed-dates-list');
+                        el.innerHTML = dates.length ? dates.map(function (d) {
+                            var parts = d.split('-');
+                            var label = new Date(parts[0], parts[1]-1, parts[2]).toLocaleDateString(undefined, {day:'numeric',month:'short',year:'numeric'});
+                            return '<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:20px;font-size:12px;font-weight:600;">'
+                                 + label
+                                 + '<button type="button" data-date="'+d+'" aria-label="Remove '+d+'" style="background:none;border:none;cursor:pointer;padding:0;line-height:1;color:#991b1b;font-size:16px;margin-left:2px;">&times;</button></span>';
+                        }).join('') : '<em style="color:#9ca3af;font-size:13px;">No closed dates set.</em>';
+                        document.getElementById('tb-closed-dates-json').value = JSON.stringify(dates);
+                    }
+                    render();
+                    document.getElementById('tb-add-closed-date').addEventListener('click', function () {
+                        var v = document.getElementById('tb-closed-date-picker').value;
+                        if (!v || dates.indexOf(v) !== -1) return;
+                        dates.push(v); dates.sort();
+                        document.getElementById('tb-closed-date-picker').value = '';
+                        render();
+                    });
+                    document.getElementById('tb-closed-dates-list').addEventListener('click', function (e) {
+                        var btn = e.target.closest('button[data-date]');
+                        if (!btn) return;
+                        dates = dates.filter(function (x) { return x !== btn.dataset.date; });
+                        render();
+                    });
+                }());
+                </script>
+
                 <!-- ── Seating Areas ──────────────────────────────────── -->
                 <div class="tb-settings-section">
                     <h2>Seating Areas</h2>
@@ -711,6 +964,30 @@ class TB_Admin {
 
                 <?php submit_button('Save Settings'); ?>
             </form>
+
+            <div class="tb-settings-section" style="margin-top:24px;">
+                <h2>Export &amp; Import Settings</h2>
+                <p class="description">Export all plugin settings to a JSON file for backup or to transfer to another site. Importing will overwrite current settings immediately.</p>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;">
+                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+                        <?php wp_nonce_field('tb_export_settings', 'tb_nonce'); ?>
+                        <input type="hidden" name="action" value="tb_export_settings">
+                        <button type="submit" class="button">Export Settings</button>
+                    </form>
+                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" enctype="multipart/form-data">
+                        <?php wp_nonce_field('tb_import_settings', 'tb_nonce'); ?>
+                        <input type="hidden" name="action" value="tb_import_settings">
+                        <input type="file" name="tb_import_file" accept=".json" required style="display:inline-block;margin-right:8px;">
+                        <button type="submit" class="button">Import Settings</button>
+                    </form>
+                </div>
+                <?php if (isset($_GET['imported'])): ?>
+                <div class="notice notice-success inline" style="margin-top:12px;"><p>Settings imported successfully.</p></div>
+                <?php endif; ?>
+                <?php if (isset($_GET['import_error'])): ?>
+                <div class="notice notice-error inline" style="margin-top:12px;"><p>Import failed: invalid file.</p></div>
+                <?php endif; ?>
+            </div>
         </div>
         <?php
     }
@@ -768,7 +1045,7 @@ class TB_Admin {
                     <tbody id="tb-log-body">
                     <?php foreach ($logs as $entry): ?>
                     <tr data-level="<?= esc_attr($entry['level']) ?>" data-ctx="<?= esc_attr($entry['context']) ?>">
-                        <td class="tb-log-time"><?= esc_html(date('d M Y H:i:s', strtotime($entry['created_at']))) ?></td>
+                        <td class="tb-log-time"><?= esc_html(wp_date('d M Y H:i:s', strtotime($entry['created_at']))) ?></td>
                         <td><span class="tb-log-badge tb-log-<?= esc_attr($entry['level']) ?>"><?= esc_html($entry['level']) ?></span></td>
                         <td class="tb-log-ctx"><?= esc_html($entry['context']) ?></td>
                         <td class="tb-log-msg"><?= esc_html($entry['message']) ?></td>
@@ -793,12 +1070,21 @@ class TB_Admin {
         check_admin_referer('tb_save_reservation', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
 
-        $id = (int) ($_POST['id'] ?? 0);
-        (new TB_Reservations())->update($id, [
-            'status'      => sanitize_text_field($_POST['status']     ?? ''),
-            'table_id'    => (int) ($_POST['table_id']   ?? 0),
+        $id         = (int) ($_POST['id'] ?? 0);
+        $new_status = sanitize_text_field($_POST['status'] ?? '');
+        $res        = new TB_Reservations();
+        $old        = $res->get($id);
+        $old_status = $old ? $old['status'] : '';
+
+        $res->update($id, [
+            'status'      => $new_status,
+            'table_id'    => (int) ($_POST['table_id'] ?? 0),
             'admin_notes' => sanitize_textarea_field($_POST['admin_notes'] ?? ''),
         ]);
+
+        if ($new_status !== $old_status && in_array($new_status, ['confirmed', 'cancelled'], true)) {
+            TB_Emails::send_client_status_update($id, $new_status);
+        }
 
         wp_safe_redirect(admin_url('admin.php?page=tb-reservations&view=' . $id . '&saved=1'));
         exit;
@@ -822,9 +1108,34 @@ class TB_Admin {
         TB_Database::update_setting('booking_mode', in_array($bm, ['simple','layout'], true) ? $bm : 'simple');
         TB_Database::update_setting('max_seats', (string) max(1, (int) ($_POST['max_seats'] ?? 50)));
 
+        // Per-day opening hours
+        $days_cfg = [];
+        $day_keys = ['mon','tue','wed','thu','fri','sat','sun'];
+        $raw_wh   = $_POST['weekly_hours'] ?? []; // phpcs:ignore WordPress.Security.NonceVerification
+        foreach ($day_keys as $d) {
+            $day       = is_array($raw_wh[$d] ?? null) ? $raw_wh[$d] : [];
+            $days_cfg[$d] = [
+                'open' => !empty($day['open']),
+                'from' => preg_match('/^\d{2}:\d{2}$/', $day['from'] ?? '') ? $day['from'] : '12:00',
+                'to'   => preg_match('/^\d{2}:\d{2}$/', $day['to']   ?? '') ? $day['to']   : '22:00',
+            ];
+        }
+        TB_Database::update_setting('weekly_hours', wp_json_encode($days_cfg));
+
+        // Derive global opening_time/closing_time from the earliest open/latest close across open days
+        // so existing code that reads those settings gets a sensible fallback.
+        $open_times  = array_column(array_filter($days_cfg, fn($d) => $d['open']), 'from');
+        $close_times = array_column(array_filter($days_cfg, fn($d) => $d['open']), 'to');
+        if ($open_times) {
+            sort($open_times);
+            rsort($close_times);
+            TB_Database::update_setting('opening_time', $open_times[0]);
+            TB_Database::update_setting('closing_time',  $close_times[0]);
+        }
+
         $scalar_keys = [
             'restaurant_name','restaurant_address',
-            'opening_time','closing_time','slot_duration','sitting_duration','last_booking_offset',
+            'slot_duration','sitting_duration','last_booking_offset',
             'min_advance_hours','max_advance_days','max_party_size',
             'canvas_width','canvas_height',
         ];
@@ -859,6 +1170,13 @@ class TB_Admin {
             }
             TB_Database::update_setting('areas', wp_json_encode($areas));
         }
+
+        $closed_raw   = sanitize_text_field(wp_unslash($_POST['closed_dates'] ?? '[]'));
+        $closed_arr   = json_decode($closed_raw, true);
+        $closed_dates = is_array($closed_arr)
+            ? array_values(array_unique(array_filter($closed_arr, fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))))
+            : [];
+        TB_Database::update_setting('closed_dates', wp_json_encode($closed_dates));
 
         $retention = max(0, (int) ($_POST['data_retention_days'] ?? 0));
         TB_Database::update_setting('data_retention_days',      (string) $retention);
@@ -984,6 +1302,21 @@ class TB_Admin {
                     </table>
                 </div>
 
+                <!-- ── Booking Success Message ───────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Booking Success Message</h2>
+                    <p class="description">Shown to the guest on-screen after a successful booking. Use <code>{party}</code>, <code>{date}</code>, <code>{time}</code>, <code>{ref}</code> as placeholders. Leave blank for the default message.</p>
+                    <table class="form-table">
+                        <tr>
+                            <th><label for="e-success-msg">Success Message</label></th>
+                            <td>
+                                <textarea id="e-success-msg" name="booking_success_message" rows="3" class="large-text"><?= esc_textarea($cfg['booking_success_message'] ?? '') ?></textarea>
+                                <p class="description">Example: <em>Thanks! Your table for {party} on {date} at {time} is confirmed. Reference: {ref}</em></p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
                 <!-- ── Reminder Emails ────────────────────────────────── -->
                 <div class="tb-settings-section">
                     <h2>Reminder Emails</h2>
@@ -1051,8 +1384,9 @@ class TB_Admin {
         TB_Database::update_setting('email_notifications', isset($_POST['email_notifications']) ? '1' : '0');
 
         // Content
-        TB_Database::update_setting('cancellation_policy', sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));
-        TB_Database::update_setting('email_footer',        sanitize_text_field($_POST['email_footer'] ?? ''));
+        TB_Database::update_setting('cancellation_policy',    sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));
+        TB_Database::update_setting('email_footer',            sanitize_text_field($_POST['email_footer'] ?? ''));
+        TB_Database::update_setting('booking_success_message', sanitize_textarea_field($_POST['booking_success_message'] ?? ''));
 
         // Reminders
         TB_Database::update_setting('reminders_enabled', isset($_POST['reminders_enabled']) ? '1' : '0');
@@ -1088,6 +1422,7 @@ class TB_Admin {
         $current_density      = TB_Database::get_setting('booking_density', 'default');
         $current_stack_btns   = (bool) TB_Database::get_setting('booking_stack_buttons', '0');
         $current_steps_mobile = TB_Database::get_setting('booking_steps_mobile', 'labels');
+        $current_ui_scale     = TB_Database::get_setting('booking_ui_scale', '100');
         $themes               = tb_style_themes();
         ?>
         <div class="wrap tb-wrap">
@@ -1171,6 +1506,17 @@ class TB_Admin {
                             </td>
                         </tr>
                         <tr>
+                            <th scope="row">UI scale</th>
+                            <td>
+                                <select name="booking_ui_scale">
+                                    <option value="100" <?= selected($current_ui_scale, '100', false) ?>>100% — default</option>
+                                    <option value="125" <?= selected($current_ui_scale, '125', false) ?>>125% — larger</option>
+                                    <option value="150" <?= selected($current_ui_scale, '150', false) ?>>150% — largest</option>
+                                </select>
+                                <p class="description">Scales all form elements proportionally. Useful when the form appears small on large screens or high-DPI displays.</p>
+                            </td>
+                        </tr>
+                        <tr>
                             <th scope="row">Mobile step indicator</th>
                             <td>
                                 <fieldset>
@@ -1235,7 +1581,7 @@ class TB_Admin {
         ?>
         <div id="tb-deactivate-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:999999;align-items:center;justify-content:center;">
             <div style="background:#fff;border-radius:8px;padding:32px;max-width:460px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-                <h2 style="margin:0 0 12px;font-size:18px;color:#1d2327;">Deactivate Table Booking?</h2>
+                <h2 style="margin:0 0 12px;font-size:18px;color:#1d2327;">Deactivate getBooked?</h2>
                 <p style="margin:0 0 14px;color:#374151;line-height:1.6;">
                     Your reservations, tables, settings, and logs will be <strong>kept</strong>. The booking form will stop appearing on your site and scheduled reminder emails will pause until you reactivate.
                 </p>
@@ -1297,12 +1643,17 @@ class TB_Admin {
         $steps_mobile = sanitize_key($_POST['booking_steps_mobile'] ?? 'labels');
         if (!in_array($steps_mobile, $allowed_steps, true)) $steps_mobile = 'labels';
 
+        $allowed_scales = ['100', '125', '150'];
+        $ui_scale = sanitize_key($_POST['booking_ui_scale'] ?? '100');
+        if (!in_array($ui_scale, $allowed_scales, true)) $ui_scale = '100';
+
         TB_Database::update_setting('booking_style',         $style);
         TB_Database::update_setting('booking_form_width',    $width);
         TB_Database::update_setting('booking_responsive',    isset($_POST['booking_responsive'])    ? '1' : '0');
         TB_Database::update_setting('booking_density',       $density);
         TB_Database::update_setting('booking_stack_buttons', isset($_POST['booking_stack_buttons']) ? '1' : '0');
         TB_Database::update_setting('booking_steps_mobile',  $steps_mobile);
+        TB_Database::update_setting('booking_ui_scale',      $ui_scale);
         TB_Logger::info("Booking style set to: $style", 'system');
 
         wp_safe_redirect(admin_url('admin.php?page=tb-styles&saved=1'));
@@ -1317,6 +1668,274 @@ class TB_Admin {
         TB_Logger::info('Logs cleared by ' . wp_get_current_user()->user_login, 'system');
 
         wp_safe_redirect(admin_url('admin.php?page=tb-logs&cleared=1'));
+        exit;
+    }
+
+    public function handle_export_csv(): void {
+        check_admin_referer('tb_export_csv', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $res  = new TB_Reservations();
+        $rows = $res->get_all([
+            'date'     => sanitize_text_field(wp_unslash($_GET['date']   ?? '')),
+            'status'   => sanitize_text_field(wp_unslash($_GET['status'] ?? '')),
+            'area'     => sanitize_text_field(wp_unslash($_GET['area']   ?? '')),
+            'search'   => sanitize_text_field(wp_unslash($_GET['s']      ?? '')),
+            'per_page' => 9999,
+            'page'     => 1,
+            'orderby'  => 'reservation_date',
+            'order'    => 'ASC',
+        ]);
+
+        $filename = 'reservations-' . gmdate('Y-m-d') . '.csv';
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        header('Pragma: no-cache');
+
+        $out = fopen('php://output', 'w'); // phpcs:ignore WordPress.WP.AlternativeFunctions
+        fputcsv($out, ['Reference','Name','Email','Phone','Date','Time','Party','Area','Table','Status','Special Requests','Admin Notes','Created']);
+        foreach ($rows as $row) {
+            fputcsv($out, [
+                $row['reservation_number'],
+                $row['customer_name'],
+                $row['customer_email'],
+                $row['customer_phone'] ?? '',
+                $row['reservation_date'],
+                $row['reservation_time'],
+                $row['party_size'],
+                $row['seating_area'],
+                $row['table_name'] ?? '',
+                $row['status'],
+                $row['special_requests'] ?? '',
+                $row['admin_notes']      ?? '',
+                $row['created_at'],
+            ]);
+        }
+        fclose($out); // phpcs:ignore WordPress.WP.AlternativeFunctions
+        exit;
+    }
+
+    public function handle_create_reservation(): void {
+        check_admin_referer('tb_create_reservation', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $data = [
+            'customer_name'    => sanitize_text_field(wp_unslash($_POST['customer_name']    ?? '')),
+            'customer_email'   => sanitize_email(wp_unslash($_POST['customer_email']        ?? '')),
+            'customer_phone'   => sanitize_text_field(wp_unslash($_POST['customer_phone']   ?? '')),
+            'reservation_date' => sanitize_text_field(wp_unslash($_POST['reservation_date'] ?? '')),
+            'reservation_time' => sanitize_text_field(wp_unslash($_POST['reservation_time'] ?? '')),
+            'party_size'       => max(1, (int) ($_POST['party_size'] ?? 1)),
+            'seating_area'     => sanitize_text_field(wp_unslash($_POST['seating_area']     ?? '')),
+            'status'           => sanitize_text_field(wp_unslash($_POST['status']           ?? 'pending')),
+            'special_requests' => sanitize_textarea_field(wp_unslash($_POST['special_requests'] ?? '')),
+            'admin_notes'      => sanitize_textarea_field(wp_unslash($_POST['admin_notes']      ?? '')),
+            'table_id'         => (int) ($_POST['table_id'] ?? 0),
+        ];
+
+        if (!$data['customer_name'] || !$data['reservation_date'] || !$data['reservation_time'] || !$data['seating_area']) {
+            wp_die('Required fields are missing. Please go back and complete the form.', '', ['back_link' => true]);
+        }
+
+        $notify = !empty($_POST['notify_guest']);
+        $res    = new TB_Reservations();
+        $id     = $res->admin_create($data, $notify);
+
+        if (!$id) {
+            wp_die('Failed to create the reservation. Please try again.', '', ['back_link' => true]);
+        }
+
+        wp_safe_redirect(admin_url('admin.php?page=tb-reservations&view=' . $id . '&created=1'));
+        exit;
+    }
+
+    public function handle_export_settings(): void {
+        check_admin_referer('tb_export_settings', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $settings = TB_Database::get_all_settings();
+        $filename = 'table-booking-settings-' . gmdate('Y-m-d') . '.json';
+
+        header('Content-Type: application/json; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-cache, no-store');
+        echo wp_json_encode($settings, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    public function handle_import_settings(): void {
+        check_admin_referer('tb_import_settings', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $file = $_FILES['tb_import_file'] ?? null;
+        if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
+            wp_safe_redirect(admin_url('admin.php?page=tb-settings&import_error=1'));
+            exit;
+        }
+
+        $raw  = file_get_contents($file['tmp_name']); // phpcs:ignore WordPress.WP.AlternativeFunctions
+        $data = json_decode($raw, true);
+
+        if (!is_array($data)) {
+            wp_safe_redirect(admin_url('admin.php?page=tb-settings&import_error=1'));
+            exit;
+        }
+
+        $skip = ['id'];
+        foreach ($data as $key => $value) {
+            if (in_array($key, $skip, true)) continue;
+            TB_Database::update_setting(sanitize_key($key), wp_kses_post((string) $value));
+        }
+
+        TB_Logger::info('Settings imported by ' . wp_get_current_user()->user_login, 'system');
+        wp_safe_redirect(admin_url('admin.php?page=tb-settings&imported=1'));
+        exit;
+    }
+
+    public function handle_bulk_action(): void {
+        check_admin_referer('tb_bulk_action', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $action = sanitize_key($_POST['bulk_action'] ?? '');
+        $ids    = array_map('intval', (array) ($_POST['bulk_ids'] ?? []));
+        $ids    = array_filter($ids);
+
+        if (!$action || empty($ids)) {
+            wp_safe_redirect(admin_url('admin.php?page=tb-reservations'));
+            exit;
+        }
+
+        global $wpdb;
+        $table = $wpdb->prefix . 'tb_reservations';
+        $done  = 0;
+
+        if ($action === 'delete') {
+            foreach ($ids as $id) {
+                $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM `$table` WHERE id = %d", $id), ARRAY_A);
+                if (!$row) continue;
+                $wpdb->delete($table, ['id' => $id], ['%d']);
+                TB_Logger::info("Reservation #{$row['reservation_number']} deleted via bulk action", 'system');
+                $done++;
+            }
+        } else {
+            $status_map = ['confirm' => 'confirmed', 'cancel' => 'cancelled'];
+            $new_status = $status_map[$action] ?? '';
+            if (!$new_status) {
+                wp_safe_redirect(admin_url('admin.php?page=tb-reservations'));
+                exit;
+            }
+
+            foreach ($ids as $id) {
+                $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM `$table` WHERE id = %d", $id), ARRAY_A);
+                if (!$row || $row['status'] === $new_status) continue;
+                $wpdb->update($table, ['status' => $new_status], ['id' => $id], ['%s'], ['%d']);
+                if (in_array($new_status, ['confirmed', 'cancelled'], true)) {
+                    TB_Emails::send_client_status_update($id, $new_status);
+                }
+                TB_Logger::info("Reservation #{$row['reservation_number']} bulk-set to {$new_status}", 'system');
+                $done++;
+            }
+        }
+
+        wp_safe_redirect(admin_url('admin.php?page=tb-reservations&bulk_done=' . $done));
+        exit;
+    }
+
+    private function render_print_view(string $date, array $areas, array $status_options): void {
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $res  = new TB_Reservations();
+        $cfg  = TB_Database::get_all_settings();
+        $rows = $res->get_all(['date' => $date, 'per_page' => 200, 'page' => 1]);
+
+        usort($rows, fn($a, $b) => strcmp($a['reservation_time'], $b['reservation_time']));
+
+        $sit_dur   = (int) ($cfg['sitting_duration'] ?? 90);
+        $rest_name = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
+        $date_disp = wp_date('l, j F Y', strtotime($date));
+
+        ?><!DOCTYPE html>
+<html <?php language_attributes(); ?>>
+<head>
+    <meta charset="UTF-8">
+    <title>Run Sheet – <?= esc_html($date_disp) ?></title>
+    <style>
+        body { font-family: -apple-system, Arial, sans-serif; font-size: 13px; color: #111; margin: 0; padding: 20px 32px; }
+        h1 { font-size: 20px; margin: 0 0 2px; }
+        .sub { color: #555; font-size: 13px; margin: 0 0 18px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th { background: #f3f4f6; text-align: left; padding: 7px 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; border-bottom: 2px solid #d1d5db; }
+        td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; text-transform:uppercase; }
+        .badge-pending   { background:#fef3c7; color:#92400e; }
+        .badge-confirmed { background:#d1fae5; color:#065f46; }
+        .badge-cancelled { background:#fee2e2; color:#991b1b; }
+        .badge-seated    { background:#dbeafe; color:#1e40af; }
+        .badge-completed { background:#f3f4f6; color:#374151; }
+        .badge-no_show   { background:#fce7f3; color:#9d174d; }
+        .note { font-size:11px; color:#6b7280; margin:2px 0 0; }
+        .no-print-msg { display:none; }
+        @media print {
+            body { padding: 0; }
+            .no-print-msg { display:none; }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <h1><?= $rest_name ?> – Daily Run Sheet</h1>
+    <p class="sub"><?= esc_html($date_disp) ?> &mdash; <?= count($rows) ?> reservation<?= count($rows) !== 1 ? 's' : '' ?></p>
+
+    <?php if (empty($rows)): ?>
+    <p style="color:#6b7280;">No reservations on this date.</p>
+    <?php else: ?>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Ref</th>
+                <th>Guest</th>
+                <th>Party</th>
+                <th>Area</th>
+                <th>Table</th>
+                <th>Status</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($rows as $row):
+            $area_lbl  = $row['seating_area'];
+            foreach ($areas as $a) { if ($a['id'] === $row['seating_area']) { $area_lbl = $a['label']; break; } }
+            $start_ts  = strtotime($row['reservation_time']);
+            $end_ts    = $start_ts + $sit_dur * 60;
+            $badge_cls = 'badge-' . esc_attr($row['status']);
+        ?>
+        <tr>
+            <td>
+                <?= esc_html(wp_date('g:i A', $start_ts)) ?>
+                <span style="color:#9ca3af;font-size:11px;">&rarr; <?= esc_html(wp_date('g:i A', $end_ts)) ?></span>
+            </td>
+            <td style="font-family:monospace;font-size:11px;"><?= esc_html($row['reservation_number']) ?></td>
+            <td>
+                <?= esc_html($row['customer_name']) ?>
+                <?php if ($row['customer_phone']): ?>
+                <div class="note"><?= esc_html($row['customer_phone']) ?></div>
+                <?php endif; ?>
+            </td>
+            <td><?= esc_html($row['party_size']) ?></td>
+            <td><?= esc_html($area_lbl) ?></td>
+            <td><?= esc_html($row['table_name'] ?? '—') ?></td>
+            <td><span class="badge <?= $badge_cls ?>"><?= esc_html($status_options[$row['status']] ?? $row['status']) ?></span></td>
+            <td style="max-width:200px;font-size:11px;color:#374151;"><?= esc_html($row['special_requests'] ?? '') ?></td>
+        </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php endif; ?>
+</body>
+</html>
+        <?php
         exit;
     }
 }

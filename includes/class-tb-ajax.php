@@ -62,13 +62,16 @@ class TB_Ajax {
         }
 
         // Rate limiting: max 3 submission attempts per IP per 10 minutes.
-        $ip      = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'] ?? ''));
-        $rl_key  = 'tb_rl_' . md5($ip);
-        $attempts = (int) get_transient($rl_key);
-        if ($attempts >= 3) {
-            wp_send_json_error(__('Too many booking attempts. Please wait a few minutes and try again.', 'table-booking'));
+        // Admins are exempt so they can test the form without hitting the limit.
+        if (!current_user_can('manage_options')) {
+            $ip       = sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'] ?? ''));
+            $rl_key   = 'tb_rl_' . md5($ip);
+            $attempts = (int) get_transient($rl_key);
+            if ($attempts >= 3) {
+                wp_send_json_error(__('Too many booking attempts. Please wait a few minutes and try again.', 'table-booking'));
+            }
+            set_transient($rl_key, $attempts + 1, 10 * MINUTE_IN_SECONDS);
         }
-        set_transient($rl_key, $attempts + 1, 10 * MINUTE_IN_SECONDS);
 
         $required = ['date','time','area','party_size','customer_name','customer_email'];
         $data     = [];
@@ -91,8 +94,13 @@ class TB_Ajax {
             wp_send_json_error("Party size must be between 1 and $max_party");
         }
 
-        $booking_ts = strtotime($data['date'] . ' ' . $data['time']);
+        $closed = json_decode(TB_Database::get_setting('closed_dates', '[]'), true);
+        if (in_array($data['date'], (array) $closed, true)) {
+            wp_send_json_error(__('Sorry, the restaurant is closed on that date. Please choose a different date.', 'table-booking'));
+        }
+
         $min_adv    = (int) TB_Database::get_setting('min_advance_hours', 2) * 3600;
+        $booking_ts = strtotime($data['date'] . ' ' . $data['time']);
         if ($booking_ts < current_time('timestamp') + $min_adv) {
             wp_send_json_error('This time slot is no longer available');
         }
@@ -148,8 +156,8 @@ class TB_Ajax {
         wp_send_json_success([
             'id'                 => $id,
             'reservation_number' => $booking['reservation_number'],
-            'date'               => date('l, F j, Y', strtotime($booking['reservation_date'])),
-            'time'               => date('g:i A', strtotime($booking['reservation_time'])),
+            'date'               => wp_date('l, F j, Y', strtotime($booking['reservation_date'])),
+            'time'               => wp_date('g:i A', strtotime($booking['reservation_time'])),
             'party_size'         => $booking['party_size'],
         ]);
     }
@@ -172,6 +180,9 @@ class TB_Ajax {
 
         $ok = (new TB_Reservations())->update($id, ['status' => $status]);
         if ($ok !== false) {
+            if (in_array($status, ['confirmed', 'cancelled'], true)) {
+                TB_Emails::send_client_status_update($id, $status);
+            }
             wp_send_json_success(['status' => $status]);
         }
         wp_send_json_error('Update failed');

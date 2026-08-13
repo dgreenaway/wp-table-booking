@@ -40,9 +40,14 @@ class TB_Emails {
             $detail_rows .= self::detail_row('Requests', nl2br(esc_html($r['special_requests'])));
         }
 
-        $admin_url  = admin_url('admin.php?page=tb-reservations&view=' . $id);
-        $body_html  = '<p style="' . self::S_BODY . '">A new table reservation has been submitted. Please review and confirm.</p>'
-                    . '<p style="margin:20px 0 0;"><a href="' . esc_url($admin_url) . '" style="' . self::S_BTN . '">View Reservation</a></p>';
+        $admin_url     = admin_url('admin.php?page=tb-reservations&view=' . $id);
+        $confirm_token = hash_hmac('sha256', "admin_confirm:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
+        $confirm_url   = add_query_arg(['tb_action' => 'admin_confirm', 'id' => $id, 'tok' => $confirm_token], home_url('/'));
+        $body_html     = '<p style="' . self::S_BODY . '">A new table reservation has been submitted.</p>'
+                       . '<p style="margin:20px 0 0;display:flex;gap:10px;flex-wrap:wrap;">'
+                       . '<a href="' . esc_url($confirm_url) . '" style="' . self::S_BTN_GREEN . '">Confirm Booking</a>'
+                       . '<a href="' . esc_url($admin_url)   . '" style="' . self::S_BTN . '">View in Dashboard</a>'
+                       . '</p>';
 
         $html = self::wrap(
             heading:      'New Booking Received',
@@ -90,14 +95,19 @@ class TB_Emails {
             ? '<p style="' . self::S_NOTE . '">' . esc_html($cfg['cancellation_policy']) . '</p>'
             : '';
 
-        $cancel_token  = hash_hmac('sha256', "cancel:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
-        $cancel_url    = add_query_arg(['tb_action' => 'cancel', 'id' => $id, 'tok' => $cancel_token], home_url('/'));
-        $cancel_link   = '<p style="' . self::S_NOTE . '">Need to cancel? '
-                       . '<a href="' . esc_url($cancel_url) . '" style="color:#6b7280;">Cancel your reservation</a> — no account needed.</p>';
+        $cancel_token = hash_hmac('sha256', "cancel:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
+        $cancel_url   = add_query_arg(['tb_action' => 'cancel', 'id' => $id, 'tok' => $cancel_token], home_url('/'));
+        $cancel_link  = '<p style="' . self::S_NOTE . '">Need to cancel? '
+                      . '<a href="' . esc_url($cancel_url) . '" style="color:#6b7280;">Cancel your reservation</a> — no account needed.</p>';
+
+        $ical_token = hash_hmac('sha256', "ical:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
+        $ical_url   = add_query_arg(['tb_action' => 'ical', 'id' => $id, 'tok' => $ical_token], home_url('/'));
+        $ical_link  = '<p style="' . self::S_NOTE . '"><a href="' . esc_url($ical_url) . '" style="color:#6b7280;">Add to Calendar</a> — works with Google Calendar, Apple Calendar &amp; Outlook.</p>';
 
         $body_html = '<p style="' . self::S_BODY . '">Hi ' . esc_html($r['customer_name']) . ', thanks for your reservation! '
                    . 'We\'ve received your booking and will confirm it shortly.</p>'
                    . $cancellation_note
+                   . $ical_link
                    . $cancel_link;
 
         $html = self::wrap(
@@ -114,6 +124,107 @@ class TB_Emails {
             TB_Logger::info("Confirmation email sent to {$r['customer_email']} (#{$r['reservation_number']})", 'email');
         } else {
             TB_Logger::warning("Confirmation email failed for {$r['customer_email']} (#{$r['reservation_number']})", 'email');
+        }
+        return $sent;
+    }
+
+    /**
+     * Send a status-change notification to the guest (confirmed or cancelled by admin).
+     */
+    public static function send_client_status_update(int $id, string $new_status): bool {
+        $cfg = TB_Database::get_all_settings();
+        if (empty($cfg['email_notifications'])) return false;
+        if (!in_array($new_status, ['confirmed', 'cancelled'], true)) return false;
+
+        $r = self::load($id);
+        if (!$r) return false;
+
+        $detail_rows = self::detail_rows([
+            'Reference'  => $r['reservation_number'],
+            'Date'       => $r['date_label'],
+            'Time'       => $r['time_label'],
+            'Area'       => $r['area_label'],
+            'Party size' => $r['party_size'] . ' guests',
+        ]);
+
+        if ($new_status === 'confirmed') {
+            $subject    = sprintf('Booking Confirmed — %s · %s', $r['reservation_number'], $r['restaurant']);
+            $heading    = 'Your Booking is Confirmed!';
+            $subheading = 'We look forward to welcoming you.';
+            $accent     = '#059669';
+            $body_html  = '<p style="' . self::S_BODY . '">Hi ' . esc_html($r['customer_name']) . ', great news — '
+                        . 'your reservation is confirmed. We can\'t wait to see you!</p>';
+        } else {
+            $subject    = sprintf('Booking Cancelled — %s · %s', $r['reservation_number'], $r['restaurant']);
+            $heading    = 'Reservation Cancelled';
+            $subheading = 'We\'re sorry to see you go.';
+            $accent     = '#dc2626';
+            $body_html  = '<p style="' . self::S_BODY . '">Hi ' . esc_html($r['customer_name']) . ', your reservation '
+                        . 'has been cancelled. If you have any questions, please get in touch with us directly.</p>';
+        }
+
+        $html = self::wrap(
+            heading:      $heading,
+            subheading:   $subheading,
+            detail_rows:  $detail_rows,
+            body_html:    $body_html,
+            cfg:          $cfg,
+            accent_color: $accent
+        );
+
+        $sent = self::mail($r['customer_email'], $subject, $html, $cfg);
+        if ($sent) {
+            TB_Logger::info("Status email ({$new_status}) sent to {$r['customer_email']} (#{$r['reservation_number']})", 'email');
+        } else {
+            TB_Logger::warning("Status email ({$new_status}) failed for {$r['customer_email']} (#{$r['reservation_number']})", 'email');
+        }
+        return $sent;
+    }
+
+    /**
+     * Notify admin that a guest self-cancelled via the email link.
+     */
+    public static function send_admin_cancellation_notice(int $id): bool {
+        $cfg = TB_Database::get_all_settings();
+        if (empty($cfg['notify_admin'])) return false;
+
+        $r = self::load($id);
+        if (!$r) return false;
+
+        $admin_email = !empty($cfg['admin_email']) ? $cfg['admin_email'] : get_option('admin_email');
+        $subject     = sprintf('[%s] Booking Cancelled by Guest — %s, %s',
+            $r['restaurant'],
+            $r['customer_name'],
+            $r['date_label']
+        );
+
+        $detail_rows = self::detail_rows([
+            'Reference'  => $r['reservation_number'],
+            'Guest'      => $r['customer_name'],
+            'Email'      => $r['customer_email'],
+            'Phone'      => $r['customer_phone'] ?: '—',
+            'Date'       => $r['date_label'],
+            'Time'       => $r['time_label'],
+            'Party size' => $r['party_size'] . ' guests',
+            'Area'       => $r['area_label'],
+        ]);
+
+        $admin_url = admin_url('admin.php?page=tb-reservations&view=' . $id);
+        $body_html = '<p style="' . self::S_BODY . '">The guest has cancelled this reservation using the self-service link in their confirmation email.</p>'
+                   . '<p style="margin:20px 0 0;"><a href="' . esc_url($admin_url) . '" style="' . self::S_BTN . '">View Reservation</a></p>';
+
+        $html = self::wrap(
+            heading:      'Booking Cancelled by Guest',
+            subheading:   'Reservation #' . esc_html($r['reservation_number']),
+            detail_rows:  $detail_rows,
+            body_html:    $body_html,
+            cfg:          $cfg,
+            accent_color: '#dc2626'
+        );
+
+        $sent = self::mail($admin_email, $subject, $html, $cfg);
+        if ($sent) {
+            TB_Logger::info("Admin cancellation notice sent for #{$r['reservation_number']}", 'email');
         }
         return $sent;
     }
@@ -174,9 +285,10 @@ class TB_Emails {
     // Template builders
     // =========================================================================
 
-    const S_BODY = 'margin:0 0 14px;font-size:15px;color:#374151;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-    const S_NOTE = 'margin:14px 0 0;font-size:12px;color:#9ca3af;line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
-    const S_BTN  = 'display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    const S_BODY      = 'margin:0 0 14px;font-size:15px;color:#374151;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    const S_NOTE      = 'margin:14px 0 0;font-size:12px;color:#9ca3af;line-height:1.5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    const S_BTN       = 'display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
+    const S_BTN_GREEN = 'display:inline-block;padding:12px 24px;background:#059669;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
 
     private static function wrap(
         string $heading,
@@ -188,7 +300,7 @@ class TB_Emails {
     ): string {
         $restaurant = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
         $site_url   = esc_url(get_bloginfo('url'));
-        $year       = date('Y');
+        $year       = gmdate('Y');
         $footer     = !empty($cfg['email_footer']) ? esc_html($cfg['email_footer']) : "$restaurant · $site_url";
         $logo_url   = !empty($cfg['email_logo_url']) ? esc_url($cfg['email_logo_url']) : '';
 
@@ -334,8 +446,8 @@ HTML;
             'customer_name'      => $row['customer_name'],
             'customer_email'     => $row['customer_email'],
             'customer_phone'     => $row['customer_phone'] ?? '',
-            'date_label'         => date('l, F j, Y', strtotime($row['reservation_date'])),
-            'time_label'         => date('g:i A', $time_ts) . ' – ' . date('g:i A', $end_ts),
+            'date_label'         => wp_date('l, F j, Y', strtotime($row['reservation_date'])),
+            'time_label'         => wp_date('g:i A', $time_ts) . ' – ' . wp_date('g:i A', $end_ts),
             'party_size'         => $row['party_size'],
             'area_label'         => $area_label,
             'table_name'         => $row['table_name'] ?? '',

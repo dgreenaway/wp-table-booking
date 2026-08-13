@@ -21,3 +21,14 @@ foreach (['tb_reservations', 'tb_tables', 'tb_logs', 'tb_settings'] as $table) {
 }
 
 delete_option('tb_db_version');
+
+// Clear rate-limit transients.
+$wpdb->query("DELETE FROM `{$wpdb->options}` WHERE option_name LIKE '_transient_tb_rl_%' OR option_name LIKE '_transient_timeout_tb_rl_%'"); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+// Clear any remaining scheduled events.
+$crons = ['tb_send_reminders', 'tb_cleanup_old_reservations'];
+foreach ($crons as $hook) {
+    $ts = wp_next_scheduled($hook);
+    if ($ts) wp_unschedule_event($ts, $hook);
+    wp_clear_scheduled_hook($hook);
+}
