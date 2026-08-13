@@ -41,6 +41,7 @@ register_activation_hook(__FILE__, function () {
         $first_run   = strtotime('tomorrow ' . $digest_time);
         wp_schedule_event($first_run, 'daily', 'tb_daily_digest');
     }
+    set_transient('tb_activation_redirect', true, 30);
     TB_Logger::info('Plugin activated — v' . TB_VERSION, 'system');
 });
 

@@ -148,6 +148,8 @@ class TB_Database {
             // Daily digest
             'daily_digest_enabled'     => '0',
             'daily_digest_time'        => '08:00',
+            // Setup wizard
+            'setup_complete'           => '0',
         ];
 
         foreach ($defaults as $key => $value) {

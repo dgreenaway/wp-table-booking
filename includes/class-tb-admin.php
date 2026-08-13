@@ -16,8 +16,21 @@ class TB_Admin {
         add_action('admin_post_tb_import_settings',    [$this, 'handle_import_settings']);
         add_action('admin_post_tb_export_csv',         [$this, 'handle_export_csv']);
         add_action('admin_post_tb_create_reservation', [$this, 'handle_create_reservation']);
-        add_action('admin_post_tb_bulk_action',        [$this, 'handle_bulk_action']);
-        add_action('admin_footer-plugins.php',         [$this, 'deactivation_modal']);
+        add_action('admin_post_tb_bulk_action',          [$this, 'handle_bulk_action']);
+        add_action('admin_footer-plugins.php',           [$this, 'deactivation_modal']);
+        add_action('admin_init',                         [$this, 'maybe_redirect_to_setup']);
+        add_action('admin_post_tb_save_setup',           [$this, 'handle_save_setup']);
+        add_action('admin_post_tb_create_booking_page',  [$this, 'handle_create_booking_page']);
+    }
+
+    public function maybe_redirect_to_setup(): void {
+        if (isset($_GET['activate-multi']))   return;
+        if (!get_transient('tb_activation_redirect')) return;
+        delete_transient('tb_activation_redirect');
+        if (!current_user_can('manage_options')) return;
+        if (TB_Database::get_setting('setup_complete', '0') === '1') return;
+        wp_safe_redirect(admin_url('admin.php?page=tb-setup'));
+        exit;
     }
 
     public function register_menu(): void {
@@ -37,6 +50,7 @@ class TB_Admin {
         add_submenu_page('tb-reservations', 'Styles',         'Styles',         'manage_options', 'tb-styles',       [$this, 'page_styles']);
         add_submenu_page('tb-reservations', 'Reports',         'Reports',         'manage_options', 'tb-reports',      [$this, 'page_reports']);
         add_submenu_page('tb-reservations', 'Activity Log',   'Activity Log',   'manage_options', 'tb-logs',         [$this, 'page_logs']);
+        add_submenu_page(null,              'getBooked Setup', '',               'manage_options', 'tb-setup',        [$this, 'page_setup']);
     }
 
     public function enqueue_assets(string $hook): void {
@@ -71,6 +85,292 @@ class TB_Admin {
     // =========================================================================
     // Pages
     // =========================================================================
+
+    // =========================================================================
+    // Setup wizard
+    // =========================================================================
+
+    public function page_setup(): void {
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $step = max(1, min(4, (int) ($_GET['step'] ?? 1)));
+        $cfg  = TB_Database::get_all_settings();
+        ?>
+        <style>
+            #adminmenuback, #adminmenuwrap { display: none !important; }
+            #wpadminbar { display: none !important; }
+            #wpcontent  { margin-left: 0 !important; }
+            #wpbody-content { padding-bottom: 0; }
+            html { margin-top: 0 !important; }
+            body.wp-admin { background: #f1f5f9 !important; }
+            .tb-sw-input { width:100%;padding:9px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;box-sizing:border-box;line-height:1.5; }
+            .tb-sw-input:focus { border-color:#2563eb;outline:2px solid rgba(37,99,235,.2);outline-offset:0; }
+            .tb-sw-label { display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px; }
+            .tb-sw-btn   { width:100%;padding:11px;background:#2563eb;color:#fff;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s; }
+            .tb-sw-btn:hover { background:#1d4ed8; }
+        </style>
+
+        <div style="min-height:100vh;background:#f1f5f9;display:flex;flex-direction:column;align-items:center;padding:48px 16px;box-sizing:border-box;">
+
+            <div style="text-align:center;margin-bottom:32px;">
+                <div style="font-size:20px;font-weight:700;color:#111827;letter-spacing:-.3px;">getBooked</div>
+                <div style="font-size:13px;color:#9ca3af;margin-top:2px;">Setup Wizard</div>
+            </div>
+
+            <?php $this->render_setup_progress($step); ?>
+
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:36px 40px;width:100%;max-width:540px;margin-top:28px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
+                <?php
+                if      ($step === 1) $this->render_setup_step1($cfg);
+                elseif  ($step === 2) $this->render_setup_step2($cfg);
+                elseif  ($step === 3) $this->render_setup_step3($cfg);
+                else                  $this->render_setup_step4();
+                ?>
+            </div>
+
+            <?php if ($step < 4): ?>
+            <p style="margin-top:20px;font-size:13px;color:#9ca3af;">
+                <a href="<?= esc_url(admin_url('admin.php?page=tb-reservations')) ?>"
+                   onclick="return confirm('Skip setup? You can always run it again from the Reservations page.');"
+                   style="color:#9ca3af;text-decoration:underline;">Skip setup</a>
+            </p>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    private function render_setup_progress(int $step): void {
+        $labels = ['Your Restaurant', 'Opening Hours', 'Seating Areas', 'Done'];
+        echo '<div style="display:flex;align-items:flex-start;justify-content:center;max-width:540px;width:100%;">';
+        foreach ($labels as $i => $label) {
+            $num     = $i + 1;
+            $is_done = $num < $step;
+            $is_cur  = $num === $step;
+
+            if ($is_done)   { $dot_bg = '#2563eb'; $dot_tx = '#fff'; $dot_inner = '&#10003;'; }
+            elseif ($is_cur){ $dot_bg = '#2563eb'; $dot_tx = '#fff'; $dot_inner = (string) $num; }
+            else            { $dot_bg = '#e5e7eb'; $dot_tx = '#9ca3af'; $dot_inner = (string) $num; }
+
+            $lbl_color  = $is_cur ? '#2563eb' : ($is_done ? '#374151' : '#9ca3af');
+            $lbl_weight = $is_cur ? '600'     : '400';
+
+            echo '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;">';
+            echo '<div style="width:30px;height:30px;border-radius:50%;background:' . $dot_bg . ';color:' . $dot_tx . ';display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;">' . $dot_inner . '</div>';
+            echo '<span style="font-size:11px;color:' . $lbl_color . ';font-weight:' . $lbl_weight . ';text-align:center;line-height:1.3;">' . esc_html($label) . '</span>';
+            echo '</div>';
+
+            if ($i < count($labels) - 1) {
+                $line_bg = ($num < $step) ? '#2563eb' : '#e5e7eb';
+                echo '<div style="height:2px;background:' . $line_bg . ';flex:1;margin-top:14px;"></div>';
+            }
+        }
+        echo '</div>';
+    }
+
+    private function render_setup_step1(array $cfg): void { ?>
+        <h2 style="margin:0 0 4px;font-size:19px;font-weight:700;color:#111827;">Your restaurant</h2>
+        <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">These details appear in emails sent to your guests.</p>
+
+        <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+            <?php wp_nonce_field('tb_save_setup_1', 'tb_nonce'); ?>
+            <input type="hidden" name="action" value="tb_save_setup">
+            <input type="hidden" name="step"   value="1">
+
+            <div style="margin-bottom:16px;">
+                <label for="sw-name" class="tb-sw-label">Restaurant name <span style="color:#dc2626;">*</span></label>
+                <input type="text" id="sw-name" name="restaurant_name" class="tb-sw-input" required
+                       value="<?= esc_attr($cfg['restaurant_name'] ?? get_bloginfo('name')) ?>"
+                       placeholder="e.g. The Golden Fork">
+            </div>
+            <div style="margin-bottom:16px;">
+                <label for="sw-addr" class="tb-sw-label">Address <span style="font-weight:400;color:#9ca3af;">(optional)</span></label>
+                <input type="text" id="sw-addr" name="restaurant_address" class="tb-sw-input"
+                       value="<?= esc_attr($cfg['restaurant_address'] ?? '') ?>"
+                       placeholder="Shown in reminder emails">
+            </div>
+            <div style="margin-bottom:28px;">
+                <label for="sw-email" class="tb-sw-label">Booking notification email <span style="color:#dc2626;">*</span></label>
+                <input type="email" id="sw-email" name="admin_email" class="tb-sw-input" required
+                       value="<?= esc_attr($cfg['admin_email'] ?? get_option('admin_email')) ?>">
+                <p style="margin:5px 0 0;font-size:12px;color:#9ca3af;">New booking alerts will be sent here.</p>
+            </div>
+
+            <button type="submit" class="tb-sw-btn">Continue &rarr;</button>
+        </form>
+    <?php }
+
+    private function render_setup_step2(array $cfg): void {
+        $weekly_h = json_decode($cfg['weekly_hours'] ?? '{}', true);
+        $def_open  = $cfg['opening_time'] ?? '12:00';
+        $def_close = $cfg['closing_time']  ?? '22:00';
+        $days = [
+            'mon' => 'Mon', 'tue' => 'Tue', 'wed' => 'Wed', 'thu' => 'Thu',
+            'fri' => 'Fri', 'sat' => 'Sat', 'sun' => 'Sun',
+        ];
+        ?>
+        <h2 style="margin:0 0 4px;font-size:19px;font-weight:700;color:#111827;">Opening hours</h2>
+        <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">Which days are you open, and what are your hours?</p>
+
+        <div style="margin-bottom:18px;">
+            <span class="tb-sw-label" style="margin-bottom:8px;">Quick presets</span>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="button sw-preset" data-days="mon,tue,wed,thu,fri">Mon – Fri</button>
+                <button type="button" class="button sw-preset" data-days="mon,tue,wed,thu,fri,sat">Mon – Sat</button>
+                <button type="button" class="button sw-preset" data-days="mon,tue,wed,thu,fri,sat,sun">All week</button>
+            </div>
+        </div>
+
+        <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+            <?php wp_nonce_field('tb_save_setup_2', 'tb_nonce'); ?>
+            <input type="hidden" name="action" value="tb_save_setup">
+            <input type="hidden" name="step"   value="2">
+
+            <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:20px;">
+                <?php foreach ($days as $key => $lbl):
+                    $day_cfg = $weekly_h[$key] ?? ['open' => ($key !== 'sun'), 'from' => $def_open, 'to' => $def_close];
+                    $is_open = !empty($day_cfg['open']);
+                    $from    = $day_cfg['from'] ?? $def_open;
+                    $to      = $day_cfg['to']   ?? $def_close;
+                ?>
+                <div class="sw-day-row" data-day="<?= esc_attr($key) ?>"
+                     style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #f3f4f6;">
+                    <label style="display:flex;align-items:center;gap:7px;width:70px;flex-shrink:0;font-size:13px;font-weight:600;cursor:pointer;">
+                        <input type="checkbox" name="weekly_hours[<?= esc_attr($key) ?>][open]" value="1"
+                               class="sw-day-check" <?= $is_open ? 'checked' : '' ?>>
+                        <?= esc_html($lbl) ?>
+                    </label>
+                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][from]" value="<?= esc_attr($from) ?>"
+                           style="border:1px solid #d1d5db;border-radius:4px;padding:4px 6px;font-size:13px;">
+                    <span style="font-size:12px;color:#9ca3af;">to</span>
+                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][to]" value="<?= esc_attr($to) ?>"
+                           style="border:1px solid #d1d5db;border-radius:4px;padding:4px 6px;font-size:13px;">
+                </div>
+                <?php endforeach; ?>
+            </div>
+
+            <button type="submit" class="tb-sw-btn" style="margin-bottom:10px;">Continue &rarr;</button>
+            <a href="<?= esc_url(admin_url('admin.php?page=tb-setup&step=1')) ?>"
+               style="display:block;text-align:center;font-size:13px;color:#9ca3af;text-decoration:none;">&larr; Back</a>
+        </form>
+
+        <script>
+        document.querySelectorAll('.sw-preset').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var days = this.dataset.days.split(',');
+                document.querySelectorAll('.sw-day-check').forEach(function(cb) {
+                    cb.checked = days.indexOf(cb.closest('.sw-day-row').dataset.day) !== -1;
+                });
+            });
+        });
+        </script>
+    <?php }
+
+    private function render_setup_step3(array $cfg): void {
+        $areas = json_decode($cfg['areas'] ?? '[]', true);
+        ?>
+        <h2 style="margin:0 0 4px;font-size:19px;font-weight:700;color:#111827;">Seating areas</h2>
+        <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">Define where guests can be seated. You can always add more later.</p>
+
+        <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+            <?php wp_nonce_field('tb_save_setup_3', 'tb_nonce'); ?>
+            <input type="hidden" name="action" value="tb_save_setup">
+            <input type="hidden" name="step"   value="3">
+
+            <div id="sw-areas-list" style="margin-bottom:10px;">
+                <?php foreach ($areas as $i => $a): ?>
+                <div class="sw-area-row" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <input type="color"  name="areas[<?= $i ?>][color]" value="<?= esc_attr($a['color'] ?? '#3b82f6') ?>"
+                           style="width:38px;height:34px;border:1px solid #d1d5db;border-radius:6px;padding:2px;cursor:pointer;flex-shrink:0;">
+                    <input type="hidden" name="areas[<?= $i ?>][id]" value="<?= esc_attr($a['id'] ?? '') ?>">
+                    <input type="text"   name="areas[<?= $i ?>][label]" value="<?= esc_attr($a['label'] ?? '') ?>"
+                           class="tb-sw-input" style="flex:1;" placeholder="Area name" required>
+                    <button type="button" class="button sw-remove-area" style="flex-shrink:0;">&times;</button>
+                </div>
+                <?php endforeach; ?>
+            </div>
+
+            <button type="button" id="sw-add-area" class="button"
+                    style="width:100%;margin-bottom:24px;border-style:dashed;">+ Add another area</button>
+
+            <button type="submit" class="tb-sw-btn" style="margin-bottom:10px;">Finish setup &rarr;</button>
+            <a href="<?= esc_url(admin_url('admin.php?page=tb-setup&step=2')) ?>"
+               style="display:block;text-align:center;font-size:13px;color:#9ca3af;text-decoration:none;">&larr; Back</a>
+        </form>
+
+        <script>
+        (function() {
+            var idx = <?= count($areas) ?>;
+            var colours = ['#f97316','#3b82f6','#22c55e','#a855f7','#ec4899','#14b8a6'];
+
+            document.getElementById('sw-add-area').addEventListener('click', function() {
+                var list = document.getElementById('sw-areas-list');
+                var row  = document.createElement('div');
+                row.className = 'sw-area-row';
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+                row.innerHTML = '<input type="color" name="areas['+idx+'][color]" value="'+colours[idx % colours.length]+'" style="width:38px;height:34px;border:1px solid #d1d5db;border-radius:6px;padding:2px;cursor:pointer;flex-shrink:0;">'
+                              + '<input type="hidden" name="areas['+idx+'][id]" value="">'
+                              + '<input type="text" name="areas['+idx+'][label]" class="tb-sw-input" style="flex:1;" placeholder="Area name" required>'
+                              + '<button type="button" class="button sw-remove-area" style="flex-shrink:0;">&times;</button>';
+                list.appendChild(row);
+                idx++;
+                row.querySelector('input[type="text"]').focus();
+            });
+
+            document.getElementById('sw-areas-list').addEventListener('click', function(e) {
+                if (e.target.classList.contains('sw-remove-area')) {
+                    e.target.closest('.sw-area-row').remove();
+                }
+            });
+        }());
+        </script>
+    <?php }
+
+    private function render_setup_step4(): void {
+        $page_created = isset($_GET['page_created']);
+        $page_url     = $page_created ? esc_url(get_permalink((int) $_GET['page_created'])) : '';
+        ?>
+        <div style="text-align:center;">
+            <div style="width:60px;height:60px;border-radius:50%;background:#ecfdf5;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:30px;color:#059669;">&#10003;</div>
+            <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827;">You're all set!</h2>
+            <p style="color:#6b7280;margin:0 0 24px;font-size:14px;line-height:1.6;">
+                Add the booking form to any page using this shortcode:
+            </p>
+
+            <div style="display:flex;align-items:center;gap:8px;background:#f3f4f6;border:1px solid #d1d5db;border-radius:6px;padding:10px 14px;margin-bottom:20px;text-align:left;">
+                <code id="sw-shortcode" style="flex:1;font-size:15px;font-weight:700;color:#111827;font-family:monospace;">[getbooked]</code>
+                <button type="button" id="sw-copy" class="button" style="flex-shrink:0;">Copy</button>
+            </div>
+
+            <?php if ($page_url): ?>
+            <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:6px;padding:10px 14px;margin-bottom:20px;font-size:13px;color:#065f46;text-align:left;">
+                Booking page created. <a href="<?= $page_url ?>" target="_blank" style="color:#065f46;font-weight:600;">View it live &rarr;</a>
+            </div>
+            <?php else: ?>
+            <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="margin-bottom:16px;">
+                <?php wp_nonce_field('tb_create_booking_page', 'tb_nonce'); ?>
+                <input type="hidden" name="action" value="tb_create_booking_page">
+                <button type="submit" class="tb-sw-btn">Create a booking page for me &rarr;</button>
+            </form>
+            <?php endif; ?>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;">
+                <a href="<?= esc_url(admin_url('admin.php?page=tb-reservations')) ?>" class="button" style="text-align:center;">Reservations</a>
+                <a href="<?= esc_url(admin_url('admin.php?page=tb-styles'))       ?>" class="button" style="text-align:center;">Choose theme</a>
+                <a href="<?= esc_url(admin_url('admin.php?page=tb-emails'))       ?>" class="button" style="text-align:center;">Email settings</a>
+                <a href="<?= esc_url(admin_url('admin.php?page=tb-settings'))     ?>" class="button" style="text-align:center;">All settings</a>
+            </div>
+        </div>
+
+        <script>
+        document.getElementById('sw-copy').addEventListener('click', function() {
+            navigator.clipboard.writeText('[getbooked]').then(function() {
+                var btn = document.getElementById('sw-copy');
+                btn.textContent = 'Copied!';
+                setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+            });
+        });
+        </script>
+    <?php }
 
     public function page_reservations(): void {
         $res   = new TB_Reservations();
@@ -123,6 +423,12 @@ class TB_Admin {
             return;
         }
         ?>
+        <?php if (TB_Database::get_setting('setup_complete', '0') !== '1'): ?>
+        <div class="notice notice-info" style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;flex-wrap:wrap;">
+            <p style="margin:0;"><strong>Welcome to getBooked!</strong> Complete the 3-step setup to configure your restaurant and start taking bookings.</p>
+            <a href="<?= esc_url(admin_url('admin.php?page=tb-setup')) ?>" class="button button-primary" style="white-space:nowrap;">Run setup wizard &rarr;</a>
+        </div>
+        <?php endif; ?>
         <?php if (isset($_GET['created'])): ?>
         <div class="notice notice-success is-dismissible"><p>Reservation created successfully.</p></div>
         <?php endif; ?>
@@ -1944,6 +2250,114 @@ class TB_Admin {
 
         TB_Logger::info('Settings imported by ' . wp_get_current_user()->user_login, 'system');
         wp_safe_redirect(admin_url('admin.php?page=tb-settings&imported=1'));
+        exit;
+    }
+
+    public function handle_save_setup(): void {
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $step = max(1, min(3, (int) ($_POST['step'] ?? 1)));
+        check_admin_referer('tb_save_setup_' . $step, 'tb_nonce');
+
+        if ($step === 1) {
+            $name = sanitize_text_field(wp_unslash($_POST['restaurant_name'] ?? ''));
+            TB_Database::update_setting('restaurant_name',    $name);
+            TB_Database::update_setting('restaurant_address', sanitize_text_field(wp_unslash($_POST['restaurant_address'] ?? '')));
+            $email = sanitize_email(wp_unslash($_POST['admin_email'] ?? ''));
+            if ($email) {
+                TB_Database::update_setting('admin_email', $email);
+                // Mirror into email_from_* only if still at the WP default
+                if (TB_Database::get_setting('email_from_address', '') === get_option('admin_email')) {
+                    TB_Database::update_setting('email_from_address', $email);
+                }
+                if (TB_Database::get_setting('email_from_name', '') === get_bloginfo('name') || $name) {
+                    TB_Database::update_setting('email_from_name', $name ?: get_bloginfo('name'));
+                }
+            }
+            wp_safe_redirect(admin_url('admin.php?page=tb-setup&step=2'));
+            exit;
+        }
+
+        if ($step === 2) {
+            $day_keys = ['mon','tue','wed','thu','fri','sat','sun'];
+            $raw_wh   = is_array($_POST['weekly_hours'] ?? null) ? $_POST['weekly_hours'] : [];
+            $days_cfg = [];
+            foreach ($day_keys as $d) {
+                $day = is_array($raw_wh[$d] ?? null) ? $raw_wh[$d] : [];
+                $days_cfg[$d] = [
+                    'open' => !empty($day['open']),
+                    'from' => preg_match('/^\d{2}:\d{2}$/', $day['from'] ?? '') ? $day['from'] : '12:00',
+                    'to'   => preg_match('/^\d{2}:\d{2}$/', $day['to']   ?? '') ? $day['to']   : '22:00',
+                ];
+            }
+            TB_Database::update_setting('weekly_hours', wp_json_encode($days_cfg));
+
+            $open_times  = array_column(array_filter($days_cfg, fn($d) => $d['open']), 'from');
+            $close_times = array_column(array_filter($days_cfg, fn($d) => $d['open']), 'to');
+            if ($open_times) {
+                sort($open_times);  rsort($close_times);
+                TB_Database::update_setting('opening_time', $open_times[0]);
+                TB_Database::update_setting('closing_time',  $close_times[0]);
+            }
+
+            $js_map = ['sun'=>0,'mon'=>1,'tue'=>2,'wed'=>3,'thu'=>4,'fri'=>5,'sat'=>6];
+            $open_days = [];
+            foreach ($js_map as $key => $num) {
+                if (!empty($days_cfg[$key]['open'])) $open_days[] = $num;
+            }
+            TB_Database::update_setting('open_days', wp_json_encode($open_days));
+
+            wp_safe_redirect(admin_url('admin.php?page=tb-setup&step=3'));
+            exit;
+        }
+
+        if ($step === 3) {
+            if (!empty($_POST['areas']) && is_array($_POST['areas'])) {
+                $areas = [];
+                foreach ($_POST['areas'] as $a) {
+                    $label = sanitize_text_field($a['label'] ?? '');
+                    $color = sanitize_hex_color($a['color'] ?? '#888888') ?? '#888888';
+                    if (!$label) continue;
+                    $area_id   = sanitize_key($a['id'] ?? '') ?: sanitize_key($label);
+                    $base = $area_id; $n = 2;
+                    while (in_array($area_id, array_column($areas, 'id'), true)) {
+                        $area_id = $base . '-' . $n++;
+                    }
+                    $areas[] = ['id' => $area_id, 'label' => $label, 'color' => $color];
+                }
+                if ($areas) {
+                    TB_Database::update_setting('areas', wp_json_encode($areas));
+                }
+            }
+            TB_Database::update_setting('setup_complete', '1');
+            TB_Logger::info('Setup wizard completed', 'system');
+            wp_safe_redirect(admin_url('admin.php?page=tb-setup&step=4'));
+            exit;
+        }
+
+        wp_safe_redirect(admin_url('admin.php?page=tb-setup'));
+        exit;
+    }
+
+    public function handle_create_booking_page(): void {
+        check_admin_referer('tb_create_booking_page', 'tb_nonce');
+        if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+        $page_id = wp_insert_post([
+            'post_title'   => 'Book a Table',
+            'post_content' => '[getbooked]',
+            'post_status'  => 'publish',
+            'post_type'    => 'page',
+            'post_author'  => get_current_user_id(),
+        ]);
+
+        if (is_wp_error($page_id) || !$page_id) {
+            wp_safe_redirect(admin_url('admin.php?page=tb-setup&step=4&page_error=1'));
+            exit;
+        }
+
+        TB_Logger::info('Booking page created by setup wizard (post ID: ' . $page_id . ')', 'system');
+        wp_safe_redirect(admin_url('admin.php?page=tb-setup&step=4&page_created=' . $page_id));
         exit;
     }
 
