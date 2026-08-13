@@ -145,6 +145,9 @@ class TB_Database {
             // Data & privacy
             'delete_data_on_uninstall' => '0',
             'data_retention_days'      => '0',
+            // Daily digest
+            'daily_digest_enabled'     => '0',
+            'daily_digest_time'        => '08:00',
         ];
 
         foreach ($defaults as $key => $value) {

@@ -1,0 +1,54 @@
+/* ============================================================
+   getBooked – RTL overrides
+   Loaded automatically when WordPress is in a right-to-left language.
+   ============================================================ */
+
+/* Step indicator — border is on the left in RTL */
+.tb-step {
+    border-right: none;
+    border-left: 1px solid var(--tb-border);
+}
+.tb-step:first-child { border-left: none; }
+.tb-step:last-child  { border-left: 1px solid var(--tb-border); }
+
+/* Area cards — separator border flips */
+.tb-area-card {
+    border-right: none;
+    border-left: 1px solid var(--tb-bg);
+}
+.tb-area-card:first-child { border-left: none; }
+
+/* Nav buttons — Back on right, primary action on left */
+.tb-nav { flex-direction: row-reverse; }
+
+/* Summary rows — label on right */
+.tb-summary-row { flex-direction: row-reverse; }
+.tb-summary-row .lbl { text-align: left; }
+.tb-summary-row .val { text-align: right; }
+
+/* Form inputs — text aligns right */
+.tb-input,
+.tb-input::placeholder {
+    text-align: right;
+    direction: rtl;
+}
+textarea.tb-input {
+    text-align: right;
+    direction: rtl;
+}
+
+/* Section headings */
+.tb-panel h3 { text-align: right; }
+
+/* Error and loading messages */
+.tb-error   { text-align: right; }
+.tb-loading { text-align: right; }
+
+/* Success panel */
+.tb-success { text-align: right; }
+
+/* Party selector — flows right-to-left */
+.tb-party-selector { direction: rtl; }
+
+/* Time grid — flows right-to-left */
+.tb-time-grid { direction: rtl; }

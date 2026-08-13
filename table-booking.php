@@ -36,13 +36,20 @@ register_activation_hook(__FILE__, function () {
     if (!wp_next_scheduled('tb_cleanup_old_reservations')) {
         wp_schedule_event(time(), 'weekly', 'tb_cleanup_old_reservations');
     }
+    if (!wp_next_scheduled('tb_daily_digest')) {
+        $digest_time = TB_Database::get_setting('daily_digest_time', '08:00');
+        $first_run   = strtotime('tomorrow ' . $digest_time);
+        wp_schedule_event($first_run, 'daily', 'tb_daily_digest');
+    }
     TB_Logger::info('Plugin activated — v' . TB_VERSION, 'system');
 });
 
 register_deactivation_hook(__FILE__, function () {
     TB_Reminders::deactivate();
-    $ts = wp_next_scheduled('tb_cleanup_old_reservations');
-    if ($ts) wp_unschedule_event($ts, 'tb_cleanup_old_reservations');
+    foreach (['tb_cleanup_old_reservations', 'tb_daily_digest'] as $hook) {
+        $ts = wp_next_scheduled($hook);
+        if ($ts) wp_unschedule_event($ts, $hook);
+    }
 });
 
 function tb_boot() {
@@ -53,6 +60,7 @@ function tb_boot() {
     TB_Privacy::register();
 
     add_action('tb_cleanup_old_reservations', ['TB_Reservations', 'cleanup_old']);
+    add_action('tb_daily_digest',             'tb_send_daily_digest');
 
     if (is_admin()) {
         (new TB_Admin())->init();
@@ -123,6 +131,10 @@ function tb_enqueue_frontend() {
         if (!empty($weekly_h[$key]['open'])) $open_days[] = $num;
     }
     if (empty($open_days)) $open_days = [0, 1, 2, 3, 4, 5, 6]; // fallback: all days
+
+    if (is_rtl()) {
+        wp_enqueue_style('tb-booking-rtl', TB_URL . 'public/css/booking-rtl.css', ['tb-booking'], TB_VERSION);
+    }
 
     wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
     add_filter('script_loader_tag', 'tb_defer_booking_script', 10, 2);
@@ -583,4 +595,50 @@ function tb_render_booking_form() {
     <?php
     if (!$responsive) echo '</div>';
     return ob_get_clean();
+}
+
+function tb_send_daily_digest(): void {
+    if (!TB_Database::get_setting('daily_digest_enabled', '0')) return;
+
+    $cfg         = TB_Database::get_all_settings();
+    $res         = new TB_Reservations();
+    $today       = wp_date('Y-m-d');
+    $rows        = $res->get_all(['date' => $today, 'per_page' => 500, 'page' => 1]);
+    $admin_email = $cfg['admin_email'] ?? get_option('admin_email');
+    $rest_name   = $cfg['restaurant_name'] ?? get_bloginfo('name');
+    $date_disp   = wp_date('l, j F Y');
+    $count       = count($rows);
+
+    usort($rows, fn($a, $b) => strcmp($a['reservation_time'], $b['reservation_time']));
+
+    $subject = sprintf('[%s] Daily digest — %s (%d reservation%s)', $rest_name, $date_disp, $count, $count !== 1 ? 's' : '');
+
+    if ($count === 0) {
+        $body = "No reservations today ({$date_disp}).\n";
+    } else {
+        $sit_min      = (int) ($cfg['sitting_duration'] ?? 90);
+        $total_covers = array_sum(array_column($rows, 'party_size'));
+        $body         = "{$rest_name} — Reservations for {$date_disp}\n";
+        $body        .= str_repeat('─', 55) . "\n\n";
+
+        foreach ($rows as $row) {
+            $start  = wp_date('g:i A', strtotime($row['reservation_time']));
+            $end    = wp_date('g:i A', strtotime($row['reservation_time']) + $sit_min * 60);
+            $status = ucfirst(str_replace('_', ' ', $row['status']));
+            $body  .= "{$start} – {$end}   {$row['customer_name']}   Party of {$row['party_size']}   [{$status}]\n";
+            if (!empty($row['customer_phone']))    $body .= "  Phone: {$row['customer_phone']}\n";
+            if (!empty($row['special_requests']))  $body .= "  Requests: {$row['special_requests']}\n";
+            $body  .= "\n";
+        }
+
+        $body .= str_repeat('─', 55) . "\n";
+        $body .= "Total: {$count} reservation" . ($count !== 1 ? 's' : '') . ", {$total_covers} cover" . ($total_covers !== 1 ? 's' : '') . "\n";
+    }
+
+    $from_name = $cfg['email_from_name']    ?? $rest_name;
+    $from_addr = $cfg['email_from_address'] ?? get_option('admin_email');
+    $headers   = ["From: {$from_name} <{$from_addr}>", 'Content-Type: text/plain; charset=UTF-8'];
+
+    wp_mail($admin_email, $subject, $body, $headers);
+    TB_Logger::info("Daily digest sent for {$today}: {$count} reservation" . ($count !== 1 ? 's' : ''), 'cron');
 }

@@ -35,6 +35,7 @@ class TB_Admin {
         add_submenu_page('tb-reservations', 'Settings',       'Settings',       'manage_options', 'tb-settings',     [$this, 'page_settings']);
         add_submenu_page('tb-reservations', 'Emails',         'Emails',         'manage_options', 'tb-emails',       [$this, 'page_emails']);
         add_submenu_page('tb-reservations', 'Styles',         'Styles',         'manage_options', 'tb-styles',       [$this, 'page_styles']);
+        add_submenu_page('tb-reservations', 'Reports',         'Reports',         'manage_options', 'tb-reports',      [$this, 'page_reports']);
         add_submenu_page('tb-reservations', 'Activity Log',   'Activity Log',   'manage_options', 'tb-logs',         [$this, 'page_logs']);
     }
 
@@ -992,6 +993,125 @@ class TB_Admin {
         <?php
     }
 
+    public function page_reports(): void {
+        global $wpdb;
+        $table = $wpdb->prefix . 'tb_reservations';
+
+        // ── This month stats ──
+        $month_from  = wp_date('Y-m-01');
+        $month_to    = wp_date('Y-m-t');
+        $month_stats = $wpdb->get_row($wpdb->prepare(
+            "SELECT COUNT(*) as total,
+                    COALESCE(SUM(party_size), 0) as covers,
+                    SUM(status = 'cancelled') as cancelled
+             FROM {$table}
+             WHERE reservation_date BETWEEN %s AND %s",
+            $month_from, $month_to
+        ), ARRAY_A);
+
+        // ── Last 30 days per-day (confirmed/pending/seated/completed) ──
+        $bar_rows = $wpdb->get_results(
+            "SELECT reservation_date, COUNT(*) as cnt
+             FROM {$table}
+             WHERE reservation_date >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+               AND status NOT IN ('cancelled','no_show')
+             GROUP BY reservation_date",
+            ARRAY_A
+        );
+
+        $bar_data = [];
+        for ($i = 29; $i >= 0; $i--) {
+            $bar_data[wp_date('Y-m-d', strtotime("-{$i} days"))] = 0;
+        }
+        foreach ($bar_rows as $r) {
+            if (isset($bar_data[$r['reservation_date']])) {
+                $bar_data[$r['reservation_date']] = (int) $r['cnt'];
+            }
+        }
+        $max_cnt = max(array_values($bar_data)) ?: 1;
+
+        // ── Status breakdown last 30 days ──
+        $status_rows = $wpdb->get_results(
+            "SELECT status, COUNT(*) as cnt
+             FROM {$table}
+             WHERE reservation_date >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+             GROUP BY status
+             ORDER BY cnt DESC",
+            ARRAY_A
+        );
+
+        $status_colours = [
+            'pending'   => ['#fef3c7', '#92400e'],
+            'confirmed' => ['#d1fae5', '#065f46'],
+            'seated'    => ['#dbeafe', '#1e40af'],
+            'completed' => ['#f3f4f6', '#374151'],
+            'cancelled' => ['#fee2e2', '#991b1b'],
+            'no_show'   => ['#fce7f3', '#9d174d'],
+        ];
+        ?>
+        <div class="wrap tb-wrap">
+            <h1>Reports</h1>
+            <hr class="wp-header-end">
+
+            <h2 style="font-size:14px;font-weight:600;color:#374151;margin:24px 0 12px;"><?= esc_html(wp_date('F Y')) ?></h2>
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:32px;">
+                <?php
+                $stat_items = [
+                    ['Total bookings', (int) ($month_stats['total']     ?? 0), '#2563eb'],
+                    ['Covers',         (int) ($month_stats['covers']    ?? 0), '#7c3aed'],
+                    ['Cancellations',  (int) ($month_stats['cancelled'] ?? 0), '#dc2626'],
+                ];
+                foreach ($stat_items as [$lbl, $val, $clr]):
+                ?>
+                <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:20px 28px;min-width:160px;">
+                    <div style="font-size:32px;font-weight:700;color:<?= esc_attr($clr) ?>;line-height:1;"><?= esc_html($val) ?></div>
+                    <div style="font-size:13px;color:#6b7280;margin-top:6px;"><?= esc_html($lbl) ?></div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+
+            <h2 style="font-size:14px;font-weight:600;color:#374151;margin:0 0 12px;">Bookings — last 30 days</h2>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:24px 24px 12px;margin-bottom:32px;">
+                <div style="display:flex;align-items:flex-end;gap:2px;height:120px;">
+                    <?php
+                    $today = wp_date('Y-m-d');
+                    foreach ($bar_data as $date => $cnt):
+                        $pct    = $max_cnt > 0 ? round(($cnt / $max_cnt) * 100) : 0;
+                        $is_td  = ($date === $today);
+                        $colour = $is_td ? '#2563eb' : '#bfdbfe';
+                        $label  = wp_date('j', strtotime($date));
+                        $full   = wp_date('d M', strtotime($date));
+                    ?>
+                    <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px;"
+                         title="<?= esc_attr("{$full}: {$cnt} booking" . ($cnt !== 1 ? 's' : '')) ?>">
+                        <div style="width:100%;background:<?= esc_attr($colour) ?>;border-radius:2px 2px 0 0;height:<?= esc_attr("{$pct}%") ?>;min-height:<?= $cnt > 0 ? '3px' : '0' ?>;"></div>
+                        <?php if (in_array((int) $label, [1, 8, 15, 22, 29], true) || $is_td): ?>
+                        <div style="font-size:9px;color:<?= $is_td ? '#2563eb' : '#9ca3af' ?>;font-weight:<?= $is_td ? '700' : '400' ?>;line-height:1;flex-shrink:0;"><?= esc_html($label) ?></div>
+                        <?php else: ?>
+                        <div style="height:12px;flex-shrink:0;"></div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <p style="margin:10px 0 0;font-size:11px;color:#9ca3af;">Excludes cancelled and no-show reservations. Dark bar = today.</p>
+            </div>
+
+            <?php if (!empty($status_rows)): ?>
+            <h2 style="font-size:14px;font-weight:600;color:#374151;margin:0 0 12px;">Status breakdown — last 30 days</h2>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:32px;">
+                <?php foreach ($status_rows as $sr):
+                    [$bg, $tx] = $status_colours[$sr['status']] ?? ['#f3f4f6', '#374151'];
+                ?>
+                <div style="background:<?= esc_attr($bg) ?>;color:<?= esc_attr($tx) ?>;border-radius:20px;padding:6px 16px;font-size:13px;font-weight:600;">
+                    <?= esc_html(ucfirst(str_replace('_', ' ', $sr['status']))) ?>: <?= esc_html($sr['cnt']) ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php
+    }
+
     public function page_logs(): void {
         if (isset($_GET['cleared'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Log cleared.</p></div>';
@@ -1317,6 +1437,25 @@ class TB_Admin {
                     </table>
                 </div>
 
+                <!-- ── Daily Digest ──────────────────────────────────── -->
+                <div class="tb-settings-section">
+                    <h2>Daily Digest</h2>
+                    <p class="description">Sends a plain-text summary of the day's reservations to your admin email address each morning via WP-Cron.</p>
+                    <table class="form-table">
+                        <tr>
+                            <th>Enable digest</th>
+                            <td><label><input type="checkbox" name="daily_digest_enabled" value="1" <?= checked(1, (int)($cfg['daily_digest_enabled'] ?? 0)) ?>> Send a daily booking digest email</label></td>
+                        </tr>
+                        <tr>
+                            <th><label for="e-digest-time">Preferred send time</label></th>
+                            <td>
+                                <input type="time" id="e-digest-time" name="daily_digest_time" value="<?= esc_attr($cfg['daily_digest_time'] ?? '08:00') ?>">
+                                <p class="description">Approximate — WP-Cron fires when a page is loaded near this time. Within 15–30 minutes is typical.</p>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+
                 <!-- ── Reminder Emails ────────────────────────────────── -->
                 <div class="tb-settings-section">
                     <h2>Reminder Emails</h2>
@@ -1382,6 +1521,21 @@ class TB_Admin {
         }
         TB_Database::update_setting('notify_admin',        isset($_POST['notify_admin'])        ? '1' : '0');
         TB_Database::update_setting('email_notifications', isset($_POST['email_notifications']) ? '1' : '0');
+
+        // Daily digest
+        TB_Database::update_setting('daily_digest_enabled', isset($_POST['daily_digest_enabled']) ? '1' : '0');
+        $digest_time = sanitize_text_field($_POST['daily_digest_time'] ?? '08:00');
+        if (preg_match('/^\d{2}:\d{2}$/', $digest_time)) {
+            $old_time = TB_Database::get_setting('daily_digest_time', '08:00');
+            TB_Database::update_setting('daily_digest_time', $digest_time);
+            // Reschedule the cron if the time changed.
+            if ($digest_time !== $old_time) {
+                wp_clear_scheduled_hook('tb_daily_digest');
+                $next = strtotime('today ' . $digest_time);
+                if ($next <= time()) $next = strtotime('tomorrow ' . $digest_time);
+                wp_schedule_event($next, 'daily', 'tb_daily_digest');
+            }
+        }
 
         // Content
         TB_Database::update_setting('cancellation_policy',    sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));

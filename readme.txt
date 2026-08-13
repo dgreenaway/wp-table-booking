@@ -78,6 +78,14 @@ Prefer to match your active WordPress theme automatically? Enable **Site Styles*
 
 Back up your entire plugin configuration — time slots, floor plan, email templates, theme settings — as a JSON file and restore it on any WordPress installation.
 
+= Reports =
+
+A built-in reports page shows monthly statistics (total bookings, covers, cancellations) and a 30-day bookings-per-day bar chart — no external analytics service required.
+
+= Daily digest =
+
+Enable a plain-text morning email listing every reservation for the day, sorted by time, with guest name, party size, status, phone number, and any special requests.
+
 = Activity log =
 
 Every status change, cancellation, and configuration update is recorded with a timestamp and user. Useful for accountability and debugging.
@@ -156,6 +164,10 @@ Yes. All user-facing strings are internationalised using the `table-booking` tex
 
 Yes. All strings use the standard WordPress `__()` and `_e()` functions with the `table-booking` text domain. WPML and Polylang can translate all front-end and email strings using the included `.pot` file.
 
+= Does the plugin work on WordPress Multisite? =
+
+getBooked has been tested on standard single-site WordPress installations. It is not officially supported in Multisite / Network configurations. It may work as a site-level plugin, but data is stored in per-site tables and the plugin has not been tested in a network-activated context.
+
 = Will my data be removed if I delete the plugin? =
 
 Only if you enable **Remove all data on uninstall** in **getBooked > Settings > Advanced** before deleting. With that option active, all plugin database tables, options, scheduled events, and transients are removed. With it inactive, your data is preserved so you can reinstall without losing anything.
@@ -192,6 +204,10 @@ Only if you enable **Remove all data on uninstall** in **getBooked > Settings > 
 * Settings export and import as JSON.
 * Activity log for status changes and configuration updates.
 * Rate limiting and honeypot spam prevention.
+* Duplicate booking prevention: same email + date + time returns a friendly error rather than creating a second reservation.
+* Reports page: monthly statistics and a 30-day bookings-per-day bar chart in the admin.
+* Daily digest email: opt-in plain-text summary of the day's reservations sent to the admin each morning via WP-Cron.
+* RTL language support: booking form layout flips automatically when WordPress is set to a right-to-left language.
 * Clean uninstall option to remove all plugin data on deletion.
 
 == Upgrade Notice ==

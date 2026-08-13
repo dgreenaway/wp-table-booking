@@ -105,6 +105,18 @@ class TB_Ajax {
             wp_send_json_error('This time slot is no longer available');
         }
 
+        // Duplicate booking check — same email, same date+time, still active.
+        global $wpdb;
+        $dup = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$wpdb->prefix}tb_reservations
+             WHERE customer_email = %s AND reservation_date = %s AND reservation_time = %s
+             AND status IN ('pending','confirmed')",
+            $data['customer_email'], $data['date'], $data['time']
+        ));
+        if ($dup) {
+            wp_send_json_error(__('You already have a reservation for this date and time. Please check your confirmation email, or contact us to make changes.', 'table-booking'));
+        }
+
         $open_days    = json_decode(TB_Database::get_setting('open_days',    '[0,1,2,3,4,5,6]'), true);
         $closed_dates = json_decode(TB_Database::get_setting('closed_dates', '[]'),              true);
         $date_ts      = strtotime($data['date']);
