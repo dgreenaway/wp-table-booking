@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Greenaway Digital
+# Copyright (C) 2024 dgtalweb
 # This file is distributed under the GPL v2 or later.
 msgid ""
 msgstr ""
@@ -23,7 +23,7 @@ msgid "A complete table reservation system for restaurants — multi-step bookin
 msgstr ""
 
 #. Author of the plugin
-msgid "Greenaway Digital"
+msgid "dgtalweb"
 msgstr ""
 
 #: table-booking.php

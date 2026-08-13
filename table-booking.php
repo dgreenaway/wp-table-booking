@@ -3,8 +3,8 @@
  * Plugin Name:       getBooked
  * Description:       A complete table reservation system for restaurants — multi-step booking form, floor plan editor, automated emails, and a full admin dashboard.
  * Version:           1.0.0
- * Author:            Greenaway Digital
- * Author URI:        https://greenawaydigital.com
+ * Author:            dgtalweb
+ * Author URI:        https://dgtalweb.com
  * Text Domain:       table-booking
  * License:           GPL v2 or later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html

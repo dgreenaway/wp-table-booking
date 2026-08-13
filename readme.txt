@@ -1,5 +1,5 @@
 === getBooked – Table Reservations ===
-Contributors: greenawaydigital
+Contributors: dgtalweb
 Tags: reservation, booking, restaurant, table booking, appointments
 Requires at least: 6.0
 Tested up to: 6.8
