@@ -1,6 +1,6 @@
-# getBooked – Table Reservations for WordPress
+# getBooked - Table Reservations for WordPress
 
-A self-contained table reservation system for restaurants. No monthly fees, no third-party accounts — everything runs inside WordPress.
+A self-contained table reservation system for restaurants. No monthly fees, no third-party accounts, everything runs inside WordPress.
 
 ---
 
@@ -15,7 +15,7 @@ That's the short version. There's quite a bit more under the hood.
 ## Features
 
 ### Booking form
-- Multi-step form — date & area, time & party size, details, review
+- Multi-step form (date & area, time & party size, details, review)
 - Two booking modes: **Simple** (time slots + total capacity) or **Floor Plan** (drag-and-drop table layout)
 - Shortcode `[getbooked]` or native Gutenberg block
 - Works with Elementor, Bricks, Divi, and WPBakery
@@ -29,7 +29,7 @@ That's the short version. There's quite a bit more under the hood.
 - Reservations list with filters, search, status badges, and summary stats
 - Detail view with guest info, internal notes, and one-click status changes
 - Bulk confirm, cancel, or delete
-- Daily run sheet — a printer-friendly view of any day's bookings
+- Daily run sheet, a printer-friendly view of any day's bookings
 
 ### Emails
 - Customer confirmation sent immediately on submission, with an Add to Calendar (.ics) link
@@ -54,7 +54,7 @@ Form width, spacing density, mobile layout, step indicator style, and UI scale a
 - Settings export and import as JSON
 - Activity log for all status changes and config updates
 - Rate limiting and honeypot spam protection
-- Clean uninstall — optionally removes every table, option, and transient on deletion
+- Clean uninstall that optionally removes every table, option, and transient on deletion
 - Translation ready, compatible with WPML and Polylang
 
 ---
@@ -88,13 +88,13 @@ The legacy shortcode `[table_booking]` is also supported for backwards compatibi
 
 ## Compatibility
 
-Tested with WordPress 6.8. Works with most caching plugins (WP Super Cache, W3 Total Cache, WP Rocket) — the booking page is automatically excluded from page caching to keep nonces fresh.
+Tested with WordPress 6.8. Works with most caching plugins (WP Super Cache, W3 Total Cache, WP Rocket). The booking page is automatically excluded from page caching to keep nonces fresh.
 
 ---
 
 ## Development
 
-Built as a standard WordPress plugin — no build step required for PHP or CSS. The JavaScript in `public/js/booking.js` and `admin/js/admin.js` is plain ES5-compatible jQuery, no bundler needed.
+Built as a standard WordPress plugin with no build step required for PHP or CSS. The JavaScript in `public/js/booking.js` and `admin/js/admin.js` is plain ES5-compatible jQuery, no bundler needed.
 
 If you want to contribute or fork, just clone the repo and drop the folder into your local WordPress install's `wp-content/plugins/` directory.
 
@@ -109,7 +109,7 @@ Things that might be worth adding down the line:
 - Waitlist for fully-booked slots
 - SMS reminders via Twilio or similar
 
-Not committed to any of these — just ideas.
+Not committed to any of these, just ideas.
 
 ---
 
