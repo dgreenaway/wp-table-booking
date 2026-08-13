@@ -949,8 +949,11 @@ class TB_Admin {
     }
 
     public function page_settings(): void {
-        $cfg   = TB_Database::get_all_settings();
-        $areas = json_decode($cfg['areas'] ?? '[]', true);
+        $cfg        = TB_Database::get_all_settings();
+        $areas      = json_decode($cfg['areas'] ?? '[]', true);
+        $valid_tabs = ['booking', 'hours', 'areas', 'advanced'];
+        $tab        = isset($_GET['tab']) && in_array($_GET['tab'], $valid_tabs, true)
+                      ? $_GET['tab'] : 'booking';
 
         if (isset($_GET['saved'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>';
@@ -960,344 +963,347 @@ class TB_Admin {
             <h1>getBooked Settings</h1>
             <hr class="wp-header-end">
 
+            <nav class="nav-tab-wrapper" style="margin-bottom:0;padding-bottom:0;">
+                <?php
+                $tab_labels = ['booking' => 'Booking', 'hours' => 'Hours', 'areas' => 'Areas', 'advanced' => 'Advanced'];
+                foreach ($tab_labels as $slug => $label):
+                    $url = add_query_arg(['page' => 'tb-settings', 'tab' => $slug], admin_url('admin.php'));
+                ?>
+                <a href="<?= esc_url($url) ?>" class="nav-tab <?= $tab === $slug ? 'nav-tab-active' : '' ?>"><?= esc_html($label) ?></a>
+                <?php endforeach; ?>
+            </nav>
+
             <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" class="tb-settings-form">
                 <?php wp_nonce_field('tb_save_settings', 'tb_nonce'); ?>
                 <input type="hidden" name="action" value="tb_save_settings">
+                <input type="hidden" name="tb_settings_tab" value="<?= esc_attr($tab) ?>">
 
-                <!-- ── Booking Mode ──────────────────────────────────── -->
-                <?php $mode = $cfg['booking_mode'] ?? 'simple'; ?>
-                <div class="tb-settings-section">
-                    <h2>Booking Mode</h2>
-                    <p class="description">Choose how the system manages table availability.</p>
-                    <div class="tb-mode-cards">
-                        <label class="tb-mode-card <?= $mode === 'simple' ? 'tb-mode-selected' : '' ?>">
-                            <input type="radio" name="booking_mode" value="simple" <?= checked($mode, 'simple', false) ?>>
-                            <div class="tb-mode-card-body">
-                                <strong>Simple</strong>
-                                <span>Set a maximum number of covers per time slot. No floor plan needed — great for small venues.</span>
-                            </div>
-                        </label>
-                        <label class="tb-mode-card <?= $mode === 'layout' ? 'tb-mode-selected' : '' ?>">
-                            <input type="radio" name="booking_mode" value="layout" <?= checked($mode, 'layout', false) ?>>
-                            <div class="tb-mode-card-body">
-                                <strong>Floor Plan</strong>
-                                <span>Draw individual tables on a floor plan. Bookings are assigned to specific tables.</span>
-                            </div>
-                        </label>
+                <!-- ══ TAB: Booking ══════════════════════════════════════ -->
+                <div id="tb-tab-booking" <?= $tab !== 'booking' ? 'style="display:none"' : '' ?>>
+
+                    <?php $mode = $cfg['booking_mode'] ?? 'simple'; ?>
+                    <div class="tb-settings-section">
+                        <h2>Booking Mode</h2>
+                        <p class="description">Choose how the system manages table availability.</p>
+                        <div class="tb-mode-cards">
+                            <label class="tb-mode-card <?= $mode === 'simple' ? 'tb-mode-selected' : '' ?>">
+                                <input type="radio" name="booking_mode" value="simple" <?= checked($mode, 'simple', false) ?>>
+                                <div class="tb-mode-card-body">
+                                    <strong>Simple</strong>
+                                    <span>Set a maximum number of covers per time slot. No floor plan needed — great for small venues.</span>
+                                </div>
+                            </label>
+                            <label class="tb-mode-card <?= $mode === 'layout' ? 'tb-mode-selected' : '' ?>">
+                                <input type="radio" name="booking_mode" value="layout" <?= checked($mode, 'layout', false) ?>>
+                                <div class="tb-mode-card-body">
+                                    <strong>Floor Plan</strong>
+                                    <span>Draw individual tables on a floor plan. Bookings are assigned to specific tables.</span>
+                                </div>
+                            </label>
+                        </div>
+                        <div id="tb-simple-opts" style="margin-top:16px;<?= $mode !== 'simple' ? 'display:none;' : '' ?>">
+                            <table class="form-table" style="margin-top:0;">
+                                <tr>
+                                    <th><label for="s-max-seats">Max covers per slot</label></th>
+                                    <td>
+                                        <input type="number" id="s-max-seats" name="max_seats"
+                                               value="<?= esc_attr($cfg['max_seats'] ?? 50) ?>"
+                                               min="1" max="9999" class="small-text">
+                                        <p class="description">Total number of guests that can be booked into any single time slot across all areas.</p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
                     </div>
-                    <div id="tb-simple-opts" style="margin-top:16px; <?= $mode !== 'simple' ? 'display:none;' : '' ?>">
-                        <table class="form-table" style="margin-top:0;">
+
+                    <div class="tb-settings-section">
+                        <h2>General</h2>
+                        <table class="form-table">
                             <tr>
-                                <th><label for="s-max-seats">Max covers per slot</label></th>
+                                <th><label for="s-name">Restaurant Name</label></th>
+                                <td><input type="text" id="s-name" name="restaurant_name" value="<?= esc_attr($cfg['restaurant_name'] ?? '') ?>" class="regular-text"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-addr">Restaurant Address</label></th>
+                                <td><input type="text" id="s-addr" name="restaurant_address" value="<?= esc_attr($cfg['restaurant_address'] ?? '') ?>" class="regular-text" placeholder="Shown in reminder emails"></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="tb-settings-section">
+                        <h2>Slot Settings</h2>
+                        <table class="form-table">
+                            <tr>
+                                <th><label for="s-dur">Slot Duration</label></th>
                                 <td>
-                                    <input type="number" id="s-max-seats" name="max_seats"
-                                           value="<?= esc_attr($cfg['max_seats'] ?? 50) ?>"
-                                           min="1" max="9999" class="small-text">
-                                    <p class="description">Total number of guests that can be booked into any single time slot across all areas.</p>
+                                    <select id="s-dur" name="slot_duration">
+                                        <?php foreach ([30,60,90,120] as $m): ?>
+                                        <option value="<?= $m ?>" <?= selected((int)($cfg['slot_duration'] ?? 60), $m, false) ?>><?= $m ?> minutes</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <p class="description">Interval between available booking times shown to guests.</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-sit">Sitting Duration</label></th>
+                                <td>
+                                    <select id="s-sit" name="sitting_duration">
+                                        <?php foreach ([30,45,60,75,90,105,120,150,180] as $m):
+                                            $hrs = $m >= 60 ? floor($m / 60) . 'h' . ($m % 60 ? ' ' . ($m % 60) . 'm' : '') : $m . 'm';
+                                        ?>
+                                        <option value="<?= $m ?>" <?= selected((int)($cfg['sitting_duration'] ?? 90), $m, false) ?>><?= $hrs ?> (<?= $m ?> min)</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <p class="description">How long a party occupies a table/slot after their booking time. A 1:00 PM booking with a 90-minute sitting means the table is free again at 2:30 PM.</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-lbo">Last booking offset</label></th>
+                                <td>
+                                    <input type="number" id="s-lbo" name="last_booking_offset" value="<?= esc_attr($cfg['last_booking_offset'] ?? 60) ?>" min="0" max="480" class="small-text">
+                                    minutes before closing
+                                    <p class="description">Additional buffer after the sitting duration. Set to 0 to use only the sitting duration as the cutoff.</p>
                                 </td>
                             </tr>
                         </table>
                     </div>
-                </div>
 
-                <!-- ── General ───────────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>General</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th><label for="s-name">Restaurant Name</label></th>
-                            <td><input type="text" id="s-name" name="restaurant_name" value="<?= esc_attr($cfg['restaurant_name'] ?? '') ?>" class="regular-text"></td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-addr">Restaurant Address</label></th>
-                            <td><input type="text" id="s-addr" name="restaurant_address" value="<?= esc_attr($cfg['restaurant_address'] ?? '') ?>" class="regular-text" placeholder="Shown in reminder emails"></td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- ── Booking Hours ──────────────────────────────────── -->
-                <?php
-                $weekly_hours_raw = $cfg['weekly_hours'] ?? '{}';
-                $weekly_hours     = json_decode($weekly_hours_raw, true);
-                $days = [
-                    'mon' => 'Monday',    'tue' => 'Tuesday',  'wed' => 'Wednesday',
-                    'thu' => 'Thursday',  'fri' => 'Friday',   'sat' => 'Saturday',
-                    'sun' => 'Sunday',
-                ];
-                $default_open  = $cfg['opening_time'] ?? '12:00';
-                $default_close = $cfg['closing_time']  ?? '22:00';
-                ?>
-                <div class="tb-settings-section">
-                    <h2>Opening Hours</h2>
-                    <p class="description">Set the days and hours guests can make bookings. Closed days will show no available times.</p>
-                    <table class="form-table">
-                        <?php foreach ($days as $key => $label):
-                            $day_cfg = $weekly_hours[$key] ?? ['open' => true, 'from' => $default_open, 'to' => $default_close];
-                            $is_open = !empty($day_cfg['open']);
-                            $from    = $day_cfg['from'] ?? $default_open;
-                            $to      = $day_cfg['to']   ?? $default_close;
-                        ?>
-                        <tr>
-                            <th style="width:130px;"><?= esc_html($label) ?></th>
-                            <td>
-                                <label style="margin-right:16px;">
-                                    <input type="checkbox" name="weekly_hours[<?= esc_attr($key) ?>][open]" value="1"
-                                        <?= checked($is_open, true, false) ?>> Open
-                                </label>
-                                <label>From
-                                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][from]"
-                                        value="<?= esc_attr($from) ?>" style="margin-left:6px;margin-right:10px;">
-                                </label>
-                                <label>To
-                                    <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][to]"
-                                        value="<?= esc_attr($to) ?>" style="margin-left:6px;">
-                                </label>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </table>
-                </div>
-
-                <!-- ── Slot Settings ─────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Slot Settings</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th><label for="s-dur">Slot Duration</label></th>
-                            <td>
-                                <select id="s-dur" name="slot_duration">
-                                    <?php foreach ([30,60,90,120] as $m): ?>
-                                    <option value="<?= $m ?>" <?= selected((int)($cfg['slot_duration'] ?? 60), $m, false) ?>><?= $m ?> minutes</option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <p class="description">Interval between available booking times shown to guests.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-sit">Sitting Duration</label></th>
-                            <td>
-                                <select id="s-sit" name="sitting_duration">
-                                    <?php foreach ([30,45,60,75,90,105,120,150,180] as $m):
-                                        $hrs = $m >= 60 ? floor($m / 60) . 'h' . ($m % 60 ? ' ' . ($m % 60) . 'm' : '') : $m . 'm';
-                                    ?>
-                                    <option value="<?= $m ?>" <?= selected((int)($cfg['sitting_duration'] ?? 90), $m, false) ?>><?= $hrs ?> (<?= $m ?> min)</option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <p class="description">How long a party occupies a table/slot after their booking time. A 1:00 PM booking with a 90-minute sitting means the table is free again at 2:30 PM.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-lbo">Last booking offset</label></th>
-                            <td>
-                                <input type="number" id="s-lbo" name="last_booking_offset" value="<?= esc_attr($cfg['last_booking_offset'] ?? 60) ?>" min="0" max="480" class="small-text">
-                                minutes before closing
-                                <p class="description">Additional buffer after the sitting duration. Set to 0 to use only the sitting duration as the cutoff.</p>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- ── Opening Days & Closures ───────────────────────── -->
-                <?php
-                $open_days    = json_decode($cfg['open_days']    ?? '[0,1,2,3,4,5,6]', true);
-                $closed_dates = $cfg['closed_dates'] ?? '[]';
-                $day_labels   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                $day_order    = [1,2,3,4,5,6,0]; // Mon–Sun display order
-                ?>
-                <div class="tb-settings-section">
-                    <h2>Opening Days &amp; Closures</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th>Open Days</th>
-                            <td>
-                                <div style="display:flex;flex-wrap:wrap;gap:10px 20px;">
-                                <?php foreach ($day_order as $dow): ?>
-                                <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;">
-                                    <input type="checkbox" name="open_days[]" value="<?= $dow ?>"
-                                           <?= in_array($dow, (array)$open_days, false) ? 'checked' : '' ?>>
-                                    <?= $day_labels[$dow] ?>
-                                </label>
-                                <?php endforeach; ?>
-                                </div>
-                                <p class="description" style="margin-top:8px;">Days of the week the restaurant accepts bookings.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th>Closed Dates</th>
-                            <td>
-                                <input type="hidden" name="closed_dates" id="tb-closed-dates-json"
-                                       value="<?= esc_attr($closed_dates) ?>">
-                                <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-                                    <input type="date" id="tb-closed-date-picker" class="tb-filter-input" style="height:30px;">
-                                    <button type="button" class="button" id="tb-add-closed-date">Add Date</button>
-                                </div>
-                                <div id="tb-closed-dates-list"></div>
-                                <p class="description" style="margin-top:8px;">Specific dates the restaurant is closed — bank holidays, private events, etc.</p>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- ── Booking Limits ─────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Booking Limits</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th><label for="s-minadv">Min advance notice</label></th>
-                            <td><input type="number" id="s-minadv" name="min_advance_hours" value="<?= esc_attr($cfg['min_advance_hours'] ?? 2) ?>" min="0" max="72" class="small-text"> hours</td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-maxadv">Max advance booking</label></th>
-                            <td><input type="number" id="s-maxadv" name="max_advance_days" value="<?= esc_attr($cfg['max_advance_days'] ?? 60) ?>" min="1" max="365" class="small-text"> days ahead</td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-party">Max party size</label></th>
-                            <td><input type="number" id="s-party" name="max_party_size" value="<?= esc_attr($cfg['max_party_size'] ?? 12) ?>" min="1" max="100" class="small-text"> guests</td>
-                        </tr>
-                    </table>
-                </div>
-
-                <!-- ── Closed Dates ──────────────────────────────────── -->
-                <?php $closed_dates = json_decode($cfg['closed_dates'] ?? '[]', true); ?>
-                <div class="tb-settings-section">
-                    <h2>Closed Dates</h2>
-                    <p class="description">Mark specific dates as unavailable. The booking form will show no time slots on these days.</p>
-                    <input type="hidden" name="closed_dates" id="tb-closed-dates-json" value="<?= esc_attr(wp_json_encode((array) $closed_dates)) ?>">
-                    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-                        <input type="date" id="tb-closed-date-picker" class="tb-admin-input" style="width:180px;">
-                        <button type="button" class="button" id="tb-add-closed-date">Add Date</button>
+                    <div class="tb-settings-section">
+                        <h2>Booking Limits</h2>
+                        <table class="form-table">
+                            <tr>
+                                <th><label for="s-minadv">Min advance notice</label></th>
+                                <td><input type="number" id="s-minadv" name="min_advance_hours" value="<?= esc_attr($cfg['min_advance_hours'] ?? 2) ?>" min="0" max="72" class="small-text"> hours</td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-maxadv">Max advance booking</label></th>
+                                <td><input type="number" id="s-maxadv" name="max_advance_days" value="<?= esc_attr($cfg['max_advance_days'] ?? 60) ?>" min="1" max="365" class="small-text"> days ahead</td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-party">Max party size</label></th>
+                                <td><input type="number" id="s-party" name="max_party_size" value="<?= esc_attr($cfg['max_party_size'] ?? 12) ?>" min="1" max="100" class="small-text"> guests</td>
+                            </tr>
+                        </table>
                     </div>
-                    <div id="tb-closed-dates-list" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px;"></div>
-                </div>
-                <script>
-                (function () {
-                    var dates = <?= wp_json_encode(array_values((array) $closed_dates)) ?>;
-                    function render() {
-                        var el = document.getElementById('tb-closed-dates-list');
-                        el.innerHTML = dates.length ? dates.map(function (d) {
-                            var parts = d.split('-');
-                            var label = new Date(parts[0], parts[1]-1, parts[2]).toLocaleDateString(undefined, {day:'numeric',month:'short',year:'numeric'});
-                            return '<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:20px;font-size:12px;font-weight:600;">'
-                                 + label
-                                 + '<button type="button" data-date="'+d+'" aria-label="Remove '+d+'" style="background:none;border:none;cursor:pointer;padding:0;line-height:1;color:#991b1b;font-size:16px;margin-left:2px;">&times;</button></span>';
-                        }).join('') : '<em style="color:#9ca3af;font-size:13px;">No closed dates set.</em>';
-                        document.getElementById('tb-closed-dates-json').value = JSON.stringify(dates);
-                    }
-                    render();
-                    document.getElementById('tb-add-closed-date').addEventListener('click', function () {
-                        var v = document.getElementById('tb-closed-date-picker').value;
-                        if (!v || dates.indexOf(v) !== -1) return;
-                        dates.push(v); dates.sort();
-                        document.getElementById('tb-closed-date-picker').value = '';
-                        render();
-                    });
-                    document.getElementById('tb-closed-dates-list').addEventListener('click', function (e) {
-                        var btn = e.target.closest('button[data-date]');
-                        if (!btn) return;
-                        dates = dates.filter(function (x) { return x !== btn.dataset.date; });
-                        render();
-                    });
-                }());
-                </script>
 
-                <!-- ── Seating Areas ──────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Seating Areas</h2>
-                    <p class="description">Define which seating areas guests can choose from.</p>
-                    <div id="tb-areas-list">
-                        <?php foreach ($areas as $i => $a): ?>
-                        <div class="tb-area-row" data-index="<?= $i ?>">
-                            <input type="text"  name="areas[<?= $i ?>][id]"    value="<?= esc_attr($a['id']) ?>"    placeholder="id (no spaces)" class="tb-admin-input" style="width:120px;" readonly>
-                            <input type="text"  name="areas[<?= $i ?>][label]" value="<?= esc_attr($a['label']) ?>" placeholder="Display name"    class="tb-admin-input" style="width:160px;">
-                            <input type="color" name="areas[<?= $i ?>][color]" value="<?= esc_attr($a['color']) ?>" class="tb-color-input">
-                            <button type="button" class="button tb-remove-area">Remove</button>
+                </div><!-- /tab-booking -->
+
+                <!-- ══ TAB: Hours ════════════════════════════════════════ -->
+                <div id="tb-tab-hours" <?= $tab !== 'hours' ? 'style="display:none"' : '' ?>>
+
+                    <?php
+                    $weekly_hours = json_decode($cfg['weekly_hours'] ?? '{}', true);
+                    $days         = ['mon'=>'Monday','tue'=>'Tuesday','wed'=>'Wednesday','thu'=>'Thursday','fri'=>'Friday','sat'=>'Saturday','sun'=>'Sunday'];
+                    $default_open  = $cfg['opening_time'] ?? '12:00';
+                    $default_close = $cfg['closing_time']  ?? '22:00';
+                    ?>
+                    <div class="tb-settings-section">
+                        <h2>Opening Hours</h2>
+                        <p class="description">Set the days and hours guests can make bookings. Closed days will show no available times.</p>
+                        <table class="form-table">
+                            <?php foreach ($days as $key => $label):
+                                $day_cfg = $weekly_hours[$key] ?? ['open' => true, 'from' => $default_open, 'to' => $default_close];
+                                $is_open = !empty($day_cfg['open']);
+                                $from    = $day_cfg['from'] ?? $default_open;
+                                $to      = $day_cfg['to']   ?? $default_close;
+                            ?>
+                            <tr>
+                                <th style="width:130px;"><?= esc_html($label) ?></th>
+                                <td>
+                                    <label style="margin-right:16px;">
+                                        <input type="checkbox" name="weekly_hours[<?= esc_attr($key) ?>][open]" value="1"
+                                            <?= checked($is_open, true, false) ?>> Open
+                                    </label>
+                                    <label>From
+                                        <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][from]"
+                                            value="<?= esc_attr($from) ?>" style="margin-left:6px;margin-right:10px;">
+                                    </label>
+                                    <label>To
+                                        <input type="time" name="weekly_hours[<?= esc_attr($key) ?>][to]"
+                                            value="<?= esc_attr($to) ?>" style="margin-left:6px;">
+                                    </label>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </table>
+                    </div>
+
+                    <?php
+                    $open_days  = json_decode($cfg['open_days'] ?? '[0,1,2,3,4,5,6]', true);
+                    $day_labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+                    $day_order  = [1,2,3,4,5,6,0];
+                    ?>
+                    <div class="tb-settings-section">
+                        <h2>Open Days</h2>
+                        <table class="form-table">
+                            <tr>
+                                <th>Days accepting bookings</th>
+                                <td>
+                                    <div style="display:flex;flex-wrap:wrap;gap:10px 20px;">
+                                    <?php foreach ($day_order as $dow): ?>
+                                    <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;">
+                                        <input type="checkbox" name="open_days[]" value="<?= $dow ?>"
+                                               <?= in_array($dow, (array)$open_days, false) ? 'checked' : '' ?>>
+                                        <?= $day_labels[$dow] ?>
+                                    </label>
+                                    <?php endforeach; ?>
+                                    </div>
+                                    <p class="description" style="margin-top:8px;">Days of the week the restaurant accepts bookings.</p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <?php $closed_dates = json_decode($cfg['closed_dates'] ?? '[]', true); ?>
+                    <div class="tb-settings-section">
+                        <h2>Closed Dates</h2>
+                        <p class="description">Mark specific dates as unavailable — bank holidays, private events, etc.</p>
+                        <input type="hidden" name="closed_dates" id="tb-closed-dates-json" value="<?= esc_attr(wp_json_encode(array_values((array) $closed_dates))) ?>">
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+                            <input type="date" id="tb-closed-date-picker" class="tb-admin-input" style="width:180px;">
+                            <button type="button" class="button" id="tb-add-closed-date">Add Date</button>
                         </div>
-                        <?php endforeach; ?>
+                        <div id="tb-closed-dates-list" style="display:flex;flex-wrap:wrap;gap:6px;min-height:24px;"></div>
                     </div>
-                    <button type="button" class="button" id="tb-add-area" style="margin-top:8px;">+ Add Area</button>
-                </div>
+                    <script>
+                    (function () {
+                        var dates = <?= wp_json_encode(array_values((array) $closed_dates)) ?>;
+                        function render() {
+                            var el = document.getElementById('tb-closed-dates-list');
+                            el.innerHTML = dates.length ? dates.map(function (d) {
+                                var parts = d.split('-');
+                                var label = new Date(parts[0], parts[1]-1, parts[2]).toLocaleDateString(undefined, {day:'numeric',month:'short',year:'numeric'});
+                                return '<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:20px;font-size:12px;font-weight:600;">'
+                                     + label
+                                     + '<button type="button" data-date="'+d+'" aria-label="Remove '+d+'" style="background:none;border:none;cursor:pointer;padding:0;line-height:1;color:#991b1b;font-size:16px;margin-left:2px;">&times;</button></span>';
+                            }).join('') : '<em style="color:#9ca3af;font-size:13px;">No closed dates set.</em>';
+                            document.getElementById('tb-closed-dates-json').value = JSON.stringify(dates);
+                        }
+                        render();
+                        document.getElementById('tb-add-closed-date').addEventListener('click', function () {
+                            var v = document.getElementById('tb-closed-date-picker').value;
+                            if (!v || dates.indexOf(v) !== -1) return;
+                            dates.push(v); dates.sort();
+                            document.getElementById('tb-closed-date-picker').value = '';
+                            render();
+                        });
+                        document.getElementById('tb-closed-dates-list').addEventListener('click', function (e) {
+                            var btn = e.target.closest('button[data-date]');
+                            if (!btn) return;
+                            dates = dates.filter(function (x) { return x !== btn.dataset.date; });
+                            render();
+                        });
+                    }());
+                    </script>
 
-                <!-- ── Canvas Size ────────────────────────────────────── -->
-                <div class="tb-settings-section">
-                    <h2>Floor Plan Canvas</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th><label for="s-cw">Canvas Width (px)</label></th>
-                            <td><input type="number" id="s-cw" name="canvas_width"  value="<?= esc_attr($cfg['canvas_width']  ?? 900) ?>" min="400" max="2000" class="small-text"></td>
-                        </tr>
-                        <tr>
-                            <th><label for="s-ch">Canvas Height (px)</label></th>
-                            <td><input type="number" id="s-ch" name="canvas_height" value="<?= esc_attr($cfg['canvas_height'] ?? 560) ?>" min="300" max="2000" class="small-text"></td>
-                        </tr>
-                    </table>
-                </div>
+                </div><!-- /tab-hours -->
 
-                <!-- ── Data & Privacy ────────────────────────────────── -->
-                <div class="tb-settings-section" id="tb-data-privacy">
-                    <h2>Data &amp; Privacy</h2>
-                    <table class="form-table">
-                        <tr>
-                            <th scope="row">Data retention</th>
-                            <td>
-                                <label>
-                                    Auto-delete completed, cancelled, and no-show reservations older than
-                                    <input type="number" name="data_retention_days"
-                                           value="<?= esc_attr($cfg['data_retention_days'] ?? '0') ?>"
-                                           min="0" max="3650" class="small-text"> days
-                                </label>
-                                <p class="description">Set to <strong>0</strong> to keep all reservations indefinitely. When set, a weekly background job removes old closed bookings. Active, pending, and confirmed reservations are never auto-deleted.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Usage data</th>
-                            <td>
-                                <?php $tel_status = get_option(TB_Telemetry::OPT_STATUS, 'pending'); ?>
-                                <p style="margin:0 0 8px;">Status: <strong><?= esc_html(TB_Telemetry::get_status_label()) ?></strong></p>
-                                <?php if ($tel_status !== 'opted_out'): ?>
-                                <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
-                                    <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
-                                    <input type="hidden" name="action" value="tb_telemetry">
-                                    <input type="hidden" name="tb_telemetry_choice" value="opted_out">
-                                    <button type="submit" class="button button-secondary button-small">Opt out</button>
-                                </form>
-                                <?php else: ?>
-                                <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
-                                    <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
-                                    <input type="hidden" name="action" value="tb_telemetry">
-                                    <input type="hidden" name="tb_telemetry_choice" value="opted_in">
-                                    <button type="submit" class="button button-secondary button-small">Opt in</button>
-                                </form>
-                                <?php endif; ?>
-                                <p class="description" style="margin-top:8px;">Anonymous data only: plugin version, WP&nbsp;/&nbsp;PHP version, booking mode, table count. No personal data, no site URLs.</p>
-                            </td>
-                        </tr>
-                        <tr>
-                            <th scope="row">Remove data on deletion</th>
-                            <td>
-                                <label>
-                                    <input type="checkbox" name="delete_data_on_uninstall" value="1" <?= checked($cfg['delete_data_on_uninstall'] ?? '0', '1', false) ?>>
-                                    Delete all plugin data when this plugin is removed from WordPress
-                                </label>
-                                <p class="description">
-                                    When ticked, permanently deletes all reservations, tables, settings, and logs when the plugin is deleted from the Plugins screen.
-                                    <strong>This cannot be undone.</strong> Leave unticked to preserve data if you reinstall later.
-                                </p>
-                                <?php
-                                global $wpdb;
-                                $res_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}tb_reservations");
-                                ?>
-                                <p class="description" style="margin-top:6px;">
-                                    Currently storing <strong><?= number_format($res_count) ?> reservation<?= $res_count !== 1 ? 's' : '' ?></strong>.
-                                </p>
-                            </td>
-                        </tr>
-                    </table>
-                </div>
+                <!-- ══ TAB: Areas ════════════════════════════════════════ -->
+                <div id="tb-tab-areas" <?= $tab !== 'areas' ? 'style="display:none"' : '' ?>>
+
+                    <div class="tb-settings-section">
+                        <h2>Seating Areas</h2>
+                        <p class="description">Define which seating areas guests can choose from.</p>
+                        <div id="tb-areas-list">
+                            <?php foreach ($areas as $i => $a): ?>
+                            <div class="tb-area-row" data-index="<?= $i ?>">
+                                <input type="text"  name="areas[<?= $i ?>][id]"    value="<?= esc_attr($a['id']) ?>"    placeholder="id (no spaces)" class="tb-admin-input" style="width:120px;" readonly>
+                                <input type="text"  name="areas[<?= $i ?>][label]" value="<?= esc_attr($a['label']) ?>" placeholder="Display name"    class="tb-admin-input" style="width:160px;">
+                                <input type="color" name="areas[<?= $i ?>][color]" value="<?= esc_attr($a['color']) ?>" class="tb-color-input">
+                                <button type="button" class="button tb-remove-area">Remove</button>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <button type="button" class="button" id="tb-add-area" style="margin-top:8px;">+ Add Area</button>
+                    </div>
+
+                    <div class="tb-settings-section">
+                        <h2>Floor Plan Canvas</h2>
+                        <table class="form-table">
+                            <tr>
+                                <th><label for="s-cw">Canvas Width (px)</label></th>
+                                <td><input type="number" id="s-cw" name="canvas_width"  value="<?= esc_attr($cfg['canvas_width']  ?? 900) ?>" min="400" max="2000" class="small-text"></td>
+                            </tr>
+                            <tr>
+                                <th><label for="s-ch">Canvas Height (px)</label></th>
+                                <td><input type="number" id="s-ch" name="canvas_height" value="<?= esc_attr($cfg['canvas_height'] ?? 560) ?>" min="300" max="2000" class="small-text"></td>
+                            </tr>
+                        </table>
+                    </div>
+
+                </div><!-- /tab-areas -->
+
+                <!-- ══ TAB: Advanced ═════════════════════════════════════ -->
+                <div id="tb-tab-advanced" <?= $tab !== 'advanced' ? 'style="display:none"' : '' ?>>
+
+                    <div class="tb-settings-section">
+                        <h2>Data &amp; Privacy</h2>
+                        <table class="form-table">
+                            <tr>
+                                <th scope="row">Data retention</th>
+                                <td>
+                                    <label>
+                                        Auto-delete completed, cancelled, and no-show reservations older than
+                                        <input type="number" name="data_retention_days"
+                                               value="<?= esc_attr($cfg['data_retention_days'] ?? '0') ?>"
+                                               min="0" max="3650" class="small-text"> days
+                                    </label>
+                                    <p class="description">Set to <strong>0</strong> to keep all reservations indefinitely. When set, a weekly background job removes old closed bookings. Active, pending, and confirmed reservations are never auto-deleted.</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Usage data</th>
+                                <td>
+                                    <?php $tel_status = get_option(TB_Telemetry::OPT_STATUS, 'pending'); ?>
+                                    <p style="margin:0 0 8px;">Status: <strong><?= esc_html(TB_Telemetry::get_status_label()) ?></strong></p>
+                                    <?php if ($tel_status !== 'opted_out'): ?>
+                                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
+                                        <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
+                                        <input type="hidden" name="action" value="tb_telemetry">
+                                        <input type="hidden" name="tb_telemetry_choice" value="opted_out">
+                                        <button type="submit" class="button button-secondary button-small">Opt out</button>
+                                    </form>
+                                    <?php else: ?>
+                                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>" style="display:inline;">
+                                        <?php wp_nonce_field('tb_telemetry_response', 'tb_telemetry_nonce'); ?>
+                                        <input type="hidden" name="action" value="tb_telemetry">
+                                        <input type="hidden" name="tb_telemetry_choice" value="opted_in">
+                                        <button type="submit" class="button button-secondary button-small">Opt in</button>
+                                    </form>
+                                    <?php endif; ?>
+                                    <p class="description" style="margin-top:8px;">Anonymous data only: plugin version, WP&nbsp;/&nbsp;PHP version, booking mode, table count. No personal data, no site URLs.</p>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th scope="row">Remove data on deletion</th>
+                                <td>
+                                    <label>
+                                        <input type="checkbox" name="delete_data_on_uninstall" value="1" <?= checked($cfg['delete_data_on_uninstall'] ?? '0', '1', false) ?>>
+                                        Delete all plugin data when this plugin is removed from WordPress
+                                    </label>
+                                    <p class="description">
+                                        When ticked, permanently deletes all reservations, tables, settings, and logs when the plugin is deleted from the Plugins screen.
+                                        <strong>This cannot be undone.</strong> Leave unticked to preserve data if you reinstall later.
+                                    </p>
+                                    <?php
+                                    global $wpdb;
+                                    $res_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}tb_reservations");
+                                    ?>
+                                    <p class="description" style="margin-top:6px;">
+                                        Currently storing <strong><?= number_format($res_count) ?> reservation<?= $res_count !== 1 ? 's' : '' ?></strong>.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
+                </div><!-- /tab-advanced -->
 
                 <?php submit_button('Save Settings'); ?>
             </form>
 
-            <div class="tb-settings-section" style="margin-top:24px;">
+            <!-- Export & Import — separate forms, only shown on Advanced tab -->
+            <div class="tb-settings-section" <?= $tab !== 'advanced' ? 'style="display:none"' : '' ?>>
                 <h2>Export &amp; Import Settings</h2>
                 <p class="description">Export all plugin settings to a JSON file for backup or to transfer to another site. Importing will overwrite current settings immediately.</p>
                 <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;">
@@ -1635,7 +1641,8 @@ class TB_Admin {
 
         TB_Logger::info('Settings saved', 'system');
 
-        wp_safe_redirect(admin_url('admin.php?page=tb-settings&saved=1'));
+        $saved_tab = sanitize_key($_POST['tb_settings_tab'] ?? 'booking');
+        wp_safe_redirect(admin_url('admin.php?page=tb-settings&tab=' . $saved_tab . '&saved=1'));
         exit;
     }
 
