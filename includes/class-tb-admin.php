@@ -21,6 +21,7 @@ class TB_Admin {
         add_action('admin_init',                         [$this, 'maybe_redirect_to_setup']);
         add_action('admin_post_tb_save_setup',           [$this, 'handle_save_setup']);
         add_action('admin_post_tb_create_booking_page',  [$this, 'handle_create_booking_page']);
+        add_action('admin_post_tb_send_support',          [$this, 'handle_send_support']);
     }
 
     public function maybe_redirect_to_setup(): void {
@@ -50,6 +51,7 @@ class TB_Admin {
         add_submenu_page('tb-reservations', 'Styles',         'Styles',         'manage_options', 'tb-styles',       [$this, 'page_styles']);
         add_submenu_page('tb-reservations', 'Reports',         'Reports',         'manage_options', 'tb-reports',      [$this, 'page_reports']);
         add_submenu_page('tb-reservations', 'Activity Log',   'Activity Log',   'manage_options', 'tb-logs',         [$this, 'page_logs']);
+        add_submenu_page('tb-reservations', 'Support',         'Support',         'manage_options', 'tb-support',      [$this, 'page_support']);
         add_submenu_page(null,              'getBooked Setup', '',               'manage_options', 'tb-setup',        [$this, 'page_setup']);
     }
 
@@ -2504,6 +2506,188 @@ class TB_Admin {
 </body>
 </html>
         <?php
+        exit;
+    }
+
+    // =========================================================================
+    // Support page
+    // =========================================================================
+
+    public function page_support(): void {
+        $current_user = wp_get_current_user();
+        $sent  = isset($_GET['sent'])  && $_GET['sent']  === '1';
+        $error = isset($_GET['error']) ? sanitize_key($_GET['error']) : '';
+
+        global $wpdb;
+        $reservation_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$wpdb->prefix}tb_reservations`");
+
+        $sys_info = implode("\n", [
+            'Plugin version : ' . TB_VERSION,
+            'WordPress      : ' . get_bloginfo('version'),
+            'PHP            : ' . PHP_VERSION,
+            'Site URL       : ' . site_url(),
+            'Active theme   : ' . wp_get_theme()->get('Name') . ' ' . wp_get_theme()->get('Version'),
+            'Booking mode   : ' . TB_Database::get_setting('booking_mode', 'simple'),
+            'Reservations   : ' . $reservation_count,
+            'WP_DEBUG       : ' . (defined('WP_DEBUG') && WP_DEBUG ? 'true' : 'false'),
+            'Multisite      : ' . (is_multisite() ? 'yes' : 'no'),
+        ]);
+        ?>
+        <div class="wrap tb-wrap">
+            <h1>Support</h1>
+
+            <?php if ($sent): ?>
+            <div class="notice notice-success"><p><strong>Message sent.</strong> We'll get back to you at your email address within 1-2 business days.</p></div>
+            <?php elseif ($error === 'ratelimit'): ?>
+            <div class="notice notice-warning"><p>You've already sent a support message in the last hour. Please wait before sending another.</p></div>
+            <?php elseif ($error === 'mail'): ?>
+            <div class="notice notice-error"><p>There was a problem sending your message. Please try emailing us directly at <a href="mailto:support@dgtalweb.com">support@dgtalweb.com</a>.</p></div>
+            <?php elseif ($error === 'empty'): ?>
+            <div class="notice notice-error"><p>Please fill in all required fields before sending.</p></div>
+            <?php endif; ?>
+
+            <div style="display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;margin-top:16px;">
+
+                <div class="tb-card">
+                    <h2 style="margin-top:0;font-size:16px;">Send a message</h2>
+                    <p style="color:#6b7280;margin-top:0;">Tell us what's on your mind — a bug, a question, or a feature idea. We read every message.</p>
+
+                    <form method="post" action="<?= esc_url(admin_url('admin-post.php')) ?>">
+                        <?php wp_nonce_field('tb_send_support', 'tb_support_nonce'); ?>
+                        <input type="hidden" name="action" value="tb_send_support">
+
+                        <table class="form-table" style="margin-top:0;">
+                            <tr>
+                                <th style="width:120px;"><label for="tb_support_name">Your name <span style="color:#ef4444;">*</span></label></th>
+                                <td><input type="text" id="tb_support_name" name="tb_support_name" class="regular-text" value="<?= esc_attr($current_user->display_name) ?>" required></td>
+                            </tr>
+                            <tr>
+                                <th><label for="tb_support_email">Your email <span style="color:#ef4444;">*</span></label></th>
+                                <td><input type="email" id="tb_support_email" name="tb_support_email" class="regular-text" value="<?= esc_attr($current_user->user_email) ?>" required></td>
+                            </tr>
+                            <tr>
+                                <th><label for="tb_support_type">Type <span style="color:#ef4444;">*</span></label></th>
+                                <td>
+                                    <select id="tb_support_type" name="tb_support_type" class="regular-text">
+                                        <option value="general">General question</option>
+                                        <option value="bug">Bug report</option>
+                                        <option value="feature">Feature request</option>
+                                        <option value="other">Other</option>
+                                    </select>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th><label for="tb_support_message">Message <span style="color:#ef4444;">*</span></label></th>
+                                <td><textarea id="tb_support_message" name="tb_support_message" rows="8" class="large-text" required placeholder="Describe your question or issue in as much detail as possible..."></textarea></td>
+                            </tr>
+                            <tr>
+                                <th><label for="tb_include_sysinfo">System info</label></th>
+                                <td>
+                                    <label>
+                                        <input type="checkbox" id="tb_include_sysinfo" name="tb_include_sysinfo" value="1" checked>
+                                        Include system info (helps us diagnose issues faster)
+                                    </label>
+                                    <details style="margin-top:8px;">
+                                        <summary style="cursor:pointer;color:#6b7280;font-size:12px;">Preview system info</summary>
+                                        <pre style="background:#f9fafb;border:1px solid #e5e7eb;padding:10px;font-size:11px;border-radius:4px;margin-top:6px;white-space:pre-wrap;"><?= esc_html($sys_info) ?></pre>
+                                    </details>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <p style="margin-top:16px;">
+                            <button type="submit" class="button button-primary">Send message</button>
+                        </p>
+                    </form>
+                </div>
+
+                <div>
+                    <div class="tb-card" style="margin-bottom:16px;">
+                        <h3 style="margin-top:0;font-size:14px;">Quick links</h3>
+                        <ul style="margin:0;padding:0 0 0 16px;color:#374151;line-height:2;">
+                            <li><a href="https://wordpress.org/support/plugin/getbooked/" target="_blank" rel="noopener">WP.org support forum</a></li>
+                            <li><a href="https://wordpress.org/plugins/getbooked/#faq" target="_blank" rel="noopener">FAQ</a></li>
+                            <li><a href="mailto:support@dgtalweb.com">Email us directly</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="tb-card">
+                        <h3 style="margin-top:0;font-size:14px;">Before you write</h3>
+                        <p style="color:#6b7280;font-size:13px;margin:0;">Check the FAQ and WP.org forum first — your question may already be answered. For bugs, enabling WP_DEBUG and copying any PHP errors into your message will speed things up considerably.</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        <?php
+    }
+
+    public function handle_send_support(): void {
+        check_admin_referer('tb_send_support', 'tb_support_nonce');
+        if (!current_user_can('manage_options')) wp_die('Forbidden');
+
+        $redirect = admin_url('admin.php?page=tb-support');
+
+        $user_id = get_current_user_id();
+        $rl_key  = 'tb_support_rl_' . $user_id;
+        if (get_transient($rl_key)) {
+            wp_safe_redirect($redirect . '&error=ratelimit');
+            exit;
+        }
+
+        $name    = sanitize_text_field($_POST['tb_support_name']    ?? '');
+        $email   = sanitize_email($_POST['tb_support_email']        ?? '');
+        $type    = sanitize_key($_POST['tb_support_type']           ?? 'general');
+        $message = sanitize_textarea_field($_POST['tb_support_message'] ?? '');
+
+        if (!$name || !$email || !$message) {
+            wp_safe_redirect($redirect . '&error=empty');
+            exit;
+        }
+
+        $type_labels = [
+            'general' => 'General question',
+            'bug'     => 'Bug report',
+            'feature' => 'Feature request',
+            'other'   => 'Other',
+        ];
+        $type_label = $type_labels[$type] ?? 'General question';
+
+        $body  = "Type: {$type_label}\n";
+        $body .= "From: {$name} <{$email}>\n";
+        $body .= "Site: " . site_url() . "\n\n";
+        $body .= "--- Message ---\n\n{$message}\n";
+
+        if (!empty($_POST['tb_include_sysinfo'])) {
+            global $wpdb;
+            $reservation_count = (int) $wpdb->get_var("SELECT COUNT(*) FROM `{$wpdb->prefix}tb_reservations`");
+            $body .= "\n--- System info ---\n\n";
+            $body .= 'Plugin version : ' . TB_VERSION . "\n";
+            $body .= 'WordPress      : ' . get_bloginfo('version') . "\n";
+            $body .= 'PHP            : ' . PHP_VERSION . "\n";
+            $body .= 'Site URL       : ' . site_url() . "\n";
+            $body .= 'Active theme   : ' . wp_get_theme()->get('Name') . ' ' . wp_get_theme()->get('Version') . "\n";
+            $body .= 'Booking mode   : ' . TB_Database::get_setting('booking_mode', 'simple') . "\n";
+            $body .= 'Reservations   : ' . $reservation_count . "\n";
+            $body .= 'WP_DEBUG       : ' . (defined('WP_DEBUG') && WP_DEBUG ? 'true' : 'false') . "\n";
+            $body .= 'Multisite      : ' . (is_multisite() ? 'yes' : 'no') . "\n";
+        }
+
+        $to      = apply_filters('getbooked_support_email', 'support@dgtalweb.com');
+        $subject = "[getBooked Support] {$type_label} from {$name}";
+        $headers = [
+            'Content-Type: text/plain; charset=UTF-8',
+            "Reply-To: {$name} <{$email}>",
+        ];
+
+        $sent = wp_mail($to, $subject, $body, $headers);
+
+        if ($sent) {
+            set_transient($rl_key, 1, HOUR_IN_SECONDS);
+            wp_safe_redirect($redirect . '&sent=1');
+        } else {
+            wp_safe_redirect($redirect . '&error=mail');
+        }
         exit;
     }
 }
