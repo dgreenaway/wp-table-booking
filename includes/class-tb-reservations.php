@@ -92,6 +92,8 @@ class TB_Reservations {
             'booking'
         );
 
+        self::clear_availability_cache($date, $area);
+
         TB_Emails::send_client_confirmation($id);
         TB_Emails::send_admin_notification($id);
 
@@ -130,10 +132,18 @@ class TB_Reservations {
         if (empty($fields)) return false;
         $ok = (bool) $wpdb->update($this->rtable, $fields, ['id' => $id], $fmts, ['%d']);
 
-        if ($ok && isset($data['status'])) {
-            TB_Logger::info("Booking #{$id} status → {$data['status']}", 'booking');
-            if (in_array($data['status'], ['cancelled','no_show','completed'], true)) {
-                TB_Reminders::cancel_for_reservation($id);
+        if ($ok) {
+            // Clear availability cache for this reservation's date/area so the next
+            // request reflects the updated capacity or cancellation immediately.
+            $row = $this->get($id);
+            if ($row) {
+                self::clear_availability_cache($row['reservation_date'], $row['seating_area']);
+            }
+            if (isset($data['status'])) {
+                TB_Logger::info("Booking #{$id} status → {$data['status']}", 'booking');
+                if (in_array($data['status'], ['cancelled','no_show','completed'], true)) {
+                    TB_Reminders::cancel_for_reservation($id);
+                }
             }
         }
 
@@ -178,6 +188,7 @@ class TB_Reservations {
         }
 
         $id = $wpdb->insert_id;
+        self::clear_availability_cache($row['reservation_date'], $row['seating_area']);
         TB_Logger::info("Admin created booking: #{$num} — {$data['customer_name']} on {$row['reservation_date']}", 'booking');
 
         if ($notify) {
@@ -266,7 +277,18 @@ class TB_Reservations {
     // Availability
     // -------------------------------------------------------------------------
 
+    private static function avail_cache_key(string $date, string $area): string {
+        return 'tb_av_' . md5($date . $area);
+    }
+
+    public static function clear_availability_cache(string $date, string $area): void {
+        delete_transient(self::avail_cache_key($date, $area));
+    }
+
     public function get_availability(string $date, string $area): array {
+        $cache_key = self::avail_cache_key($date, $area);
+        $cached    = get_transient($cache_key);
+        if ($cached !== false) return $cached;
         $cfg    = TB_Database::get_all_settings();
         $closed = json_decode($cfg['closed_dates'] ?? '[]', true);
         if (in_array($date, (array) $closed, true)) {
@@ -329,6 +351,8 @@ class TB_Reservations {
 
             $current += $slot_dur * 60;
         }
+
+        set_transient($cache_key, $slots, 2 * MINUTE_IN_SECONDS);
         return $slots;
     }
 

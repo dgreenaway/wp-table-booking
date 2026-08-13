@@ -115,6 +115,12 @@
         }, function (res) {
             $('#tb-time-loading').hide();
 
+            if (res === -1 || res === '-1') {
+                $('#tb-time-slots').html('<p style="color:#dc2626;font-size:13px;margin:0;">Your session has expired. Please <a href="" onclick="location.reload();return false;">refresh the page</a> and try again.</p>');
+                $('#tb-time-wrap').show();
+                return;
+            }
+
             if (!res.success || !res.data || !res.data.length) {
                 $('#tb-time-slots').html(
                     '<p style="color:#dc2626;font-size:13px;margin:0;">No available times for this selection.<br>Try a different date or area.</p>'
@@ -297,6 +303,11 @@
             customer_phone:   $('#tb-phone').val().trim(),
             special_requests: $('#tb-notes').val().trim(),
         }, function (res) {
+            if (res === -1 || res === '-1') {
+                $btn.prop('disabled', false).text('Confirm Booking');
+                showError('Your session has expired. Please refresh the page and try again.');
+                return;
+            }
             if (res.success) {
                 const d = res.data;
                 const tpl = tbData.successMsg || '';

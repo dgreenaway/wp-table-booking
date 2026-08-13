@@ -85,8 +85,15 @@ function tb_register_block(): void {
 add_action('plugins_loaded', 'tb_boot');
 
 function tb_enqueue_frontend() {
-    $content = get_post_field('post_content', get_the_ID());
-    if (!has_shortcode($content, 'getbooked') && !has_shortcode($content, 'table_booking')) return;
+    $post_id = get_the_ID();
+    $content = $post_id ? get_post_field('post_content', $post_id) : '';
+
+    $load = has_shortcode($content, 'getbooked')
+         || has_shortcode($content, 'table_booking')
+         || ($post_id && function_exists('has_block') && has_block('table-booking/form', $post_id))
+         || apply_filters('getbooked_load_assets', false);
+
+    if (!$load) return;
 
     $style = TB_Database::get_setting('booking_style', 'modern');
 
@@ -118,6 +125,8 @@ function tb_enqueue_frontend() {
     if (empty($open_days)) $open_days = [0, 1, 2, 3, 4, 5, 6]; // fallback: all days
 
     wp_enqueue_script('tb-booking', TB_URL . 'public/js/booking.js', ['jquery'], TB_VERSION, true);
+    add_filter('script_loader_tag', 'tb_defer_booking_script', 10, 2);
+
     wp_localize_script('tb-booking', 'tbData', [
         'ajaxUrl'     => admin_url('admin-ajax.php'),
         'nonce'       => wp_create_nonce('tb_frontend'),
@@ -128,6 +137,13 @@ function tb_enqueue_frontend() {
         'closedDates' => json_decode(TB_Database::get_setting('closed_dates', '[]'), true) ?: [],
         'successMsg'  => TB_Database::get_setting('booking_success_message', ''),
     ]);
+}
+
+function tb_defer_booking_script(string $tag, string $handle): string {
+    if ($handle === 'tb-booking') {
+        return str_replace(' src=', ' defer src=', $tag);
+    }
+    return $tag;
 }
 
 function tb_style_themes(): array {
@@ -422,6 +438,14 @@ function tb_handle_admin_confirm(): void {
 }
 
 function tb_render_booking_form() {
+    // Tell caching plugins not to cache pages containing the booking form,
+    // as a cached page will have a stale nonce that breaks AJAX submissions.
+    if (!defined('DONOTCACHEPAGE')) define('DONOTCACHEPAGE', true);
+    if (!headers_sent()) {
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        header('Pragma: no-cache');
+    }
+
     $responsive    = (bool) TB_Database::get_setting('booking_responsive', '1');
     $form_width    = TB_Database::get_setting('booking_form_width', 'default');
     $density       = TB_Database::get_setting('booking_density', 'default');

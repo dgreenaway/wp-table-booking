@@ -33,7 +33,8 @@ class TB_Database {
             PRIMARY KEY  (id),
             UNIQUE KEY reservation_number (reservation_number),
             KEY idx_date (reservation_date),
-            KEY idx_status (status)
+            KEY idx_status (status),
+            KEY idx_date_status (reservation_date, status)
         ) $charset;");
 
         dbDelta("CREATE TABLE IF NOT EXISTS $t (
