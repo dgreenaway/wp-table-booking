@@ -3,6 +3,7 @@ defined('ABSPATH') || exit;
 
 class TB_Telemetry {
 
+    const ENABLED    = false; // flip to true once the Cloudflare Worker is deployed
     const ENDPOINT   = 'https://telemetry.getbooked.workers.dev/ping';
     const OPT_STATUS = 'tb_telemetry_status';   // 'pending' | 'opted_in' | 'opted_out'
     const OPT_LAST   = 'tb_telemetry_last_ping'; // unix timestamp
@@ -35,6 +36,7 @@ class TB_Telemetry {
     }
 
     public static function maybe_show_notice(): void {
+        if (!self::ENABLED) return;
         if (get_option(self::OPT_STATUS) !== 'pending') return;
         if (!current_user_can('manage_options')) return;
         $screen = get_current_screen();
@@ -88,6 +90,7 @@ class TB_Telemetry {
     }
 
     public static function send_ping(): void {
+        if (!self::ENABLED) return;
         if (get_option(self::OPT_STATUS) !== 'opted_in') return;
 
         global $wpdb;

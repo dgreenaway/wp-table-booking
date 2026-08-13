@@ -172,6 +172,16 @@ Most frequent guests, highest lifetime covers, guests who haven't returned in 90
 
 ## Developer / Technical
 
+### Deploy telemetry worker (ready to go)
+The opt-in telemetry system is built and wired up but disabled via `TB_Telemetry::ENABLED = false`.
+The Cloudflare Worker code and D1 schema are in `worker/`. To activate:
+1. `wrangler d1 create getbooked-telemetry` — copy the database_id into `worker/wrangler.toml`
+2. `wrangler d1 execute getbooked-telemetry --file=worker/schema.sql`
+3. `wrangler deploy worker/telemetry-worker.js`
+4. Update `TB_Telemetry::ENDPOINT` with the `.workers.dev` URL
+5. Set `TB_Telemetry::ENABLED = true`
+Tracks: plugin version, WP/PHP version, booking mode, table count, reservation total, locale, multisite flag.
+
 ### Performance
 - Redis/Memcached object cache compatibility for the availability transient layer
 - Lazy-load floor plan canvas data only when the layout tab is active
