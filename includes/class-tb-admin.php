@@ -1838,8 +1838,11 @@ class TB_Admin {
 
         // Notifications
         if (!empty($_POST['admin_email'])) {
-            $admin_emails = implode(',', array_map('sanitize_email', array_map('trim', explode(',', $_POST['admin_email']))));
-            TB_Database::update_setting('admin_email', $admin_emails);
+            $admin_emails = array_filter(
+                array_map('sanitize_email', array_map('trim', explode(',', wp_unslash($_POST['admin_email'])))),
+                'is_email'
+            );
+            TB_Database::update_setting('admin_email', implode(',', $admin_emails));
         }
         TB_Database::update_setting('notify_admin',        isset($_POST['notify_admin'])        ? '1' : '0');
         TB_Database::update_setting('email_notifications', isset($_POST['email_notifications']) ? '1' : '0');

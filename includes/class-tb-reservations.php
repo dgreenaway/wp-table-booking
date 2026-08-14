@@ -556,7 +556,7 @@ class TB_Reservations {
         $cutoff  = gmdate('Y-m-d', strtotime("-{$days} days"));
         $deleted = $wpdb->query(
             $wpdb->prepare(
-                "DELETE FROM `{$wpdb->prefix}tb_reservations`
+                "DELETE FROM {$wpdb->prefix}tb_reservations
                  WHERE reservation_date < %s
                    AND status IN ('completed','cancelled','no_show')",
                 $cutoff
