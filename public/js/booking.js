@@ -37,6 +37,10 @@
         $date.attr('min', formatDate(today));
         $date.attr('max', formatDate(maxDate));
 
+        $date.on('click', function () {
+            try { this.showPicker(); } catch (e) {}
+        });
+
         $date.on('change', function () {
             const raw = $(this).val();
             $('#tb-date-error').hide().text('');

@@ -193,6 +193,25 @@
 }
 textarea.tb-input { resize: vertical; min-height: 80px; }
 
+input[type="date"].tb-input {
+    padding: 14px 16px;
+    min-height: 52px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+input[type="date"].tb-input::-webkit-calendar-picker-indicator {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.15s;
+}
+input[type="date"].tb-input:hover::-webkit-calendar-picker-indicator,
+input[type="date"].tb-input:focus::-webkit-calendar-picker-indicator {
+    opacity: 1;
+}
+
 .tb-loading { color: var(--tb-text-muted); font-size: 14px; padding: 20px 0; }
 
 /* ------ Area cards ------------------------------------------ */
