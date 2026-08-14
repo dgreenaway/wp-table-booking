@@ -438,7 +438,8 @@ HTML;
         }
 
         $sit_min  = max(1, (int) ($cfg['sitting_duration'] ?? 90));
-        $time_ts  = strtotime($row['reservation_time']);
+        $tz       = wp_timezone();
+        $time_ts  = (new DateTime($row['reservation_date'] . ' ' . $row['reservation_time'], $tz))->getTimestamp();
         $end_ts   = $time_ts + $sit_min * 60;
 
         return [
