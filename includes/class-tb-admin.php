@@ -1128,32 +1128,6 @@ class TB_Admin {
                         </table>
                     </div>
 
-                    <?php
-                    $open_days  = json_decode($cfg['open_days'] ?? '[0,1,2,3,4,5,6]', true);
-                    $day_labels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-                    $day_order  = [1,2,3,4,5,6,0];
-                    ?>
-                    <div class="tb-settings-section">
-                        <h2>Open Days</h2>
-                        <table class="form-table">
-                            <tr>
-                                <th>Days accepting bookings</th>
-                                <td>
-                                    <div style="display:flex;flex-wrap:wrap;gap:10px 20px;">
-                                    <?php foreach ($day_order as $dow): ?>
-                                    <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;cursor:pointer;">
-                                        <input type="checkbox" name="open_days[]" value="<?= $dow ?>"
-                                               <?= in_array($dow, (array)$open_days, false) ? 'checked' : '' ?>>
-                                        <?= $day_labels[$dow] ?>
-                                    </label>
-                                    <?php endforeach; ?>
-                                    </div>
-                                    <p class="description" style="margin-top:8px;">Days of the week the restaurant accepts bookings.</p>
-                                </td>
-                            </tr>
-                        </table>
-                    </div>
-
                     <?php $closed_dates = json_decode($cfg['closed_dates'] ?? '[]', true); ?>
                     <div class="tb-settings-section">
                         <h2>Closed Dates</h2>
@@ -1602,18 +1576,23 @@ class TB_Admin {
             }
         }
 
-        // Open days
-        $open_days_raw = array_map('intval', (array) ($_POST['open_days'] ?? []));
-        $open_days     = array_values(array_filter($open_days_raw, fn($d) => $d >= 0 && $d <= 6));
-        TB_Database::update_setting('open_days', wp_json_encode($open_days));
+        // Derive open_days (numeric JS array used by booking form) from weekly_hours — single source of truth.
+        $day_num_map = ['sun'=>0,'mon'=>1,'tue'=>2,'wed'=>3,'thu'=>4,'fri'=>5,'sat'=>6];
+        $derived_open = array_values(array_map(
+            fn($k) => $day_num_map[$k],
+            array_keys(array_filter($days_cfg, fn($d) => $d['open']))
+        ));
+        sort($derived_open);
+        TB_Database::update_setting('open_days', wp_json_encode($derived_open));
 
-        // Closed dates
-        $closed_raw   = sanitize_text_field($_POST['closed_dates'] ?? '[]');
+        // Closed dates — single pass with wp_unslash, uniqueness, and format validation.
+        $closed_raw   = sanitize_text_field(wp_unslash($_POST['closed_dates'] ?? '[]'));
         $closed_arr   = json_decode($closed_raw, true);
-        if (!is_array($closed_arr)) $closed_arr = [];
-        $closed_arr   = array_values(array_filter($closed_arr, fn($d) => (bool) preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)));
-        sort($closed_arr);
-        TB_Database::update_setting('closed_dates', wp_json_encode($closed_arr));
+        $closed_dates = is_array($closed_arr)
+            ? array_values(array_unique(array_filter($closed_arr, fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))))
+            : [];
+        sort($closed_dates);
+        TB_Database::update_setting('closed_dates', wp_json_encode($closed_dates));
 
         if (!empty($_POST['areas']) && is_array($_POST['areas'])) {
             $areas = [];
@@ -1627,13 +1606,6 @@ class TB_Admin {
             }
             TB_Database::update_setting('areas', wp_json_encode($areas));
         }
-
-        $closed_raw   = sanitize_text_field(wp_unslash($_POST['closed_dates'] ?? '[]'));
-        $closed_arr   = json_decode($closed_raw, true);
-        $closed_dates = is_array($closed_arr)
-            ? array_values(array_unique(array_filter($closed_arr, fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))))
-            : [];
-        TB_Database::update_setting('closed_dates', wp_json_encode($closed_dates));
 
         $retention = max(0, (int) ($_POST['data_retention_days'] ?? 0));
         TB_Database::update_setting('data_retention_days',      (string) $retention);

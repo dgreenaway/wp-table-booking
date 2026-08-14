@@ -40,7 +40,7 @@ class TB_Ajax {
         $open_days    = json_decode(TB_Database::get_setting('open_days',    '[0,1,2,3,4,5,6]'), true);
         $closed_dates = json_decode(TB_Database::get_setting('closed_dates', '[]'),              true);
 
-        if (!in_array((int) date('w', $ts), (array) $open_days, false)) {
+        if (!in_array((int) wp_date('w', $ts), (array) $open_days, false)) {
             wp_send_json_error('The restaurant is closed on this day');
         }
         if (in_array($date, (array) $closed_dates, true)) {
@@ -120,7 +120,7 @@ class TB_Ajax {
         $open_days    = json_decode(TB_Database::get_setting('open_days',    '[0,1,2,3,4,5,6]'), true);
         $closed_dates = json_decode(TB_Database::get_setting('closed_dates', '[]'),              true);
         $date_ts      = strtotime($data['date']);
-        if (!in_array((int) date('w', $date_ts), (array) $open_days, false)) {
+        if (!in_array((int) wp_date('w', $date_ts), (array) $open_days, false)) {
             wp_send_json_error('The restaurant is closed on this day');
         }
         if (in_array($data['date'], (array) $closed_dates, true)) {
