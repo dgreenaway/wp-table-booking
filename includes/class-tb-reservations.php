@@ -477,10 +477,21 @@ class TB_Reservations {
     public function get_stats(): array {
         global $wpdb;
         $today = current_time('Y-m-d');
+        $row   = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT
+                    SUM(reservation_date = %s AND status != 'cancelled')                          AS today,
+                    SUM(status = 'pending')                                                        AS pending,
+                    SUM(reservation_date >= %s AND status NOT IN ('cancelled','completed'))        AS upcoming
+                 FROM {$this->rtable}",
+                $today, $today
+            ),
+            ARRAY_A
+        );
         return [
-            'today'    => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->rtable} WHERE reservation_date = %s AND status != 'cancelled'", $today)),
-            'pending'  => (int) $wpdb->get_var("SELECT COUNT(*) FROM {$this->rtable} WHERE status = 'pending'"),
-            'upcoming' => (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$this->rtable} WHERE reservation_date >= %s AND status NOT IN ('cancelled','completed')", $today)),
+            'today'    => (int) ($row['today']    ?? 0),
+            'pending'  => (int) ($row['pending']  ?? 0),
+            'upcoming' => (int) ($row['upcoming'] ?? 0),
         ];
     }
 
