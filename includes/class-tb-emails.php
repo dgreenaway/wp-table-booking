@@ -92,7 +92,7 @@ class TB_Emails {
         }
 
         $cancellation_note = !empty($cfg['cancellation_policy'])
-            ? '<p style="' . self::S_NOTE . '">' . esc_html($cfg['cancellation_policy']) . '</p>'
+            ? '<p style="' . self::S_NOTE . '">' . wp_kses_post($cfg['cancellation_policy']) . '</p>'
             : '';
 
         $cancel_token = hash_hmac('sha256', "cancel:{$id}:{$r['reservation_number']}", wp_salt('secure_auth'));
@@ -301,7 +301,7 @@ class TB_Emails {
         $restaurant = esc_html($cfg['restaurant_name'] ?? get_bloginfo('name'));
         $site_url   = esc_url(get_bloginfo('url'));
         $year       = gmdate('Y');
-        $footer     = !empty($cfg['email_footer']) ? esc_html($cfg['email_footer']) : "$restaurant · $site_url";
+        $footer     = !empty($cfg['email_footer']) ? wp_kses_post($cfg['email_footer']) : "$restaurant · $site_url";
         $logo_url   = !empty($cfg['email_logo_url']) ? esc_url($cfg['email_logo_url']) : '';
 
         $header_content = $logo_url

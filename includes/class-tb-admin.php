@@ -1537,6 +1537,7 @@ class TB_Admin {
     public function handle_save_settings(): void {
         check_admin_referer('tb_save_settings', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
+        global $wpdb;
 
         $bm = sanitize_text_field($_POST['booking_mode'] ?? 'simple');
         TB_Database::update_setting('booking_mode', in_array($bm, ['simple','layout'], true) ? $bm : 'simple');
@@ -1589,11 +1590,13 @@ class TB_Admin {
         TB_Database::update_setting('open_days', wp_json_encode($derived_open));
 
         // Closed dates — single pass with wp_unslash, uniqueness, and format validation.
-        $closed_raw   = sanitize_text_field(wp_unslash($_POST['closed_dates'] ?? '[]'));
-        $closed_arr   = json_decode($closed_raw, true);
-        $closed_dates = is_array($closed_arr)
-            ? array_values(array_unique(array_filter($closed_arr, fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))))
-            : [];
+        // If the submitted JSON is malformed, preserve the existing stored value rather than wiping it.
+        $closed_raw = sanitize_text_field(wp_unslash($_POST['closed_dates'] ?? ''));
+        $closed_arr = json_decode($closed_raw, true);
+        if (!is_array($closed_arr)) {
+            $closed_arr = json_decode(TB_Database::get_setting('closed_dates', '[]'), true) ?: [];
+        }
+        $closed_dates = array_values(array_unique(array_filter($closed_arr, fn($d) => is_string($d) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $d))));
         sort($closed_dates);
         TB_Database::update_setting('closed_dates', wp_json_encode($closed_dates));
 
@@ -1728,14 +1731,14 @@ class TB_Admin {
                             <th><label for="e-cancel-policy">Cancellation Policy</label></th>
                             <td>
                                 <textarea id="e-cancel-policy" name="cancellation_policy" rows="3" class="large-text"><?= esc_textarea($cfg['cancellation_policy'] ?? '') ?></textarea>
-                                <p class="description">Shown at the bottom of guest confirmation emails. Leave blank to omit.</p>
+                                <p class="description">Shown at the bottom of guest confirmation emails. Leave blank to omit. Basic HTML allowed: <code>&lt;strong&gt;</code>, <code>&lt;a&gt;</code>, <code>&lt;br&gt;</code>.</p>
                             </td>
                         </tr>
                         <tr>
                             <th><label for="e-footer">Email Footer Text</label></th>
                             <td>
                                 <input type="text" id="e-footer" name="email_footer" value="<?= esc_attr($cfg['email_footer'] ?? '') ?>" class="regular-text" placeholder="e.g. 123 High Street, London · 020 7000 0000">
-                                <p class="description">Appears at the bottom of every email. Leave blank to use restaurant name + site URL.</p>
+                                <p class="description">Appears at the bottom of every email. Leave blank to use restaurant name + site URL. Basic HTML allowed: <code>&lt;a&gt;</code>, <code>&lt;strong&gt;</code>.</p>
                             </td>
                         </tr>
                     </table>
@@ -1857,8 +1860,8 @@ class TB_Admin {
         }
 
         // Content
-        TB_Database::update_setting('cancellation_policy',    sanitize_textarea_field($_POST['cancellation_policy'] ?? ''));
-        TB_Database::update_setting('email_footer',            sanitize_text_field($_POST['email_footer'] ?? ''));
+        TB_Database::update_setting('cancellation_policy',    wp_kses_post(wp_unslash($_POST['cancellation_policy'] ?? '')));
+        TB_Database::update_setting('email_footer',            wp_kses_post(wp_unslash($_POST['email_footer'] ?? '')));
         TB_Database::update_setting('booking_success_message', sanitize_textarea_field($_POST['booking_success_message'] ?? ''));
 
         // Reminders
