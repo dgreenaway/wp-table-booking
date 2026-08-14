@@ -191,9 +191,9 @@ class TB_Database {
         return isset($all[$key]) ? (string) $all[$key] : $default;
     }
 
-    public static function update_setting(string $key, string $value): void {
+    public static function update_setting(string $key, string $value): bool {
         global $wpdb;
-        $wpdb->query(
+        $result = $wpdb->query(
             $wpdb->prepare(
                 "INSERT INTO `{$wpdb->prefix}tb_settings` (setting_key, setting_value) VALUES (%s, %s)
                  ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
@@ -201,7 +201,11 @@ class TB_Database {
                 $value
             )
         );
+        if ($result === false) {
+            TB_Logger::error("Failed to save setting '{$key}': " . $wpdb->last_error, 'system');
+        }
         wp_cache_delete('tb_settings', 'table-booking');
         self::$cache = null;
+        return $result !== false;
     }
 }

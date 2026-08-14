@@ -958,6 +958,9 @@ class TB_Admin {
         if (isset($_GET['saved'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>';
         }
+        if (isset($_GET['error']) && $_GET['error'] === 'db') {
+            echo '<div class="notice notice-error is-dismissible"><p>Settings could not be saved due to a database error. Please try again, or check the Activity Log for details.</p></div>';
+        }
         ?>
         <div class="wrap tb-wrap">
             <h1>getBooked Settings</h1>
@@ -1611,10 +1614,16 @@ class TB_Admin {
         TB_Database::update_setting('data_retention_days',      (string) $retention);
         TB_Database::update_setting('delete_data_on_uninstall', isset($_POST['delete_data_on_uninstall']) ? '1' : '0');
 
-        TB_Logger::info('Settings saved', 'system');
-
         $saved_tab = sanitize_key($_POST['tb_settings_tab'] ?? 'booking');
-        wp_safe_redirect(admin_url('admin.php?page=tb-settings&tab=' . $saved_tab . '&saved=1'));
+        $base_url  = admin_url('admin.php?page=tb-settings&tab=' . $saved_tab);
+
+        if ($wpdb->last_error) {
+            TB_Logger::error('Settings save incomplete — last DB error: ' . $wpdb->last_error, 'system');
+            wp_safe_redirect($base_url . '&error=db');
+        } else {
+            TB_Logger::info('Settings saved', 'system');
+            wp_safe_redirect($base_url . '&saved=1');
+        }
         exit;
     }
 

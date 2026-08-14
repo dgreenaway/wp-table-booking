@@ -312,15 +312,17 @@ class TB_Reservations {
         $min_adv  = (int) ($cfg['min_advance_hours']    ?? 2) * 3600;
         $mode     = $cfg['booking_mode'] ?? 'simple';
 
-        $now     = current_time('timestamp');
-        $current = strtotime("$date $opening");
-        // Last slot must leave enough room for the sitting to complete before closing
-        $last    = strtotime("$date $closing") - max($lbo, $sit_dur) * 60;
+        // Build slot timestamps in the site's local timezone so opening/closing times
+        // are interpreted as the restaurant's wall-clock time, not UTC.
+        $tz      = wp_timezone();
+        $now     = time();
+        $current = (new DateTime("$date $opening", $tz))->getTimestamp();
+        $last    = (new DateTime("$date $closing",  $tz))->getTimestamp() - max($lbo, $sit_dur) * 60;
 
         $slots = [];
         while ($current <= $last) {
             $ts       = $current;
-            $time_str = gmdate('H:i', $ts);
+            $time_str = wp_date('H:i', $ts);   // local time — matches what the booking form stores
             $end_ts   = $ts + $sit_dur * 60;
 
             if ($ts < $now + $min_adv) {
@@ -334,7 +336,7 @@ class TB_Reservations {
                 $slots[] = [
                     'time'      => $time_str,
                     'label'     => wp_date('g:i A', $ts),
-                    'end_time'  => gmdate('H:i', $end_ts),
+                    'end_time'  => wp_date('H:i', $end_ts),
                     'end_label' => wp_date('g:i A', $end_ts),
                     'available' => $free > 0,
                     'tables'    => $free,
@@ -343,7 +345,7 @@ class TB_Reservations {
                 $slots[] = [
                     'time'      => $time_str,
                     'label'     => wp_date('g:i A', $ts),
-                    'end_time'  => gmdate('H:i', $end_ts),
+                    'end_time'  => wp_date('H:i', $end_ts),
                     'end_label' => wp_date('g:i A', $end_ts),
                     'available' => $this->has_seat_capacity($date, $time_str, 1, $sit_dur, $cfg),
                 ];
