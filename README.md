@@ -1,4 +1,4 @@
-# getBooked - Table Reservations for WordPress
+# getBooked - Table Reservations for WordPress - Beta/Idea
 
 A self-contained table reservation system for restaurants. No monthly fees, no third-party accounts, everything runs inside WordPress.
 
