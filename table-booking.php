@@ -15,6 +15,9 @@
 
 defined('ABSPATH') || exit;
 
+// Core bootstrap file. Defines constants, loads classes, and wires up all front-end
+// actions, shortcodes, and template hooks via the plugins_loaded callback below.
+
 define('TB_VERSION',  '1.0.0');
 define('TB_DIR',      plugin_dir_path(__FILE__));
 define('TB_URL',      plugin_dir_url(__FILE__));
@@ -31,6 +34,8 @@ require_once TB_DIR . 'includes/class-tb-ajax.php';
 require_once TB_DIR . 'includes/class-tb-privacy.php';
 require_once TB_DIR . 'includes/class-tb-telemetry.php';
 
+// Creates/upgrades DB tables, schedules crons, and sets the redirect transient
+// that sends first-time users to the setup wizard on their next admin visit.
 register_activation_hook(__FILE__, function () {
     TB_Database::install();
     TB_Reminders::activate();
@@ -47,6 +52,8 @@ register_activation_hook(__FILE__, function () {
     TB_Logger::info('Plugin activated — v' . TB_VERSION, 'system');
 });
 
+// Unschedule all crons on deactivation. Tables and data are kept — deletion only
+// happens if the user has enabled that option and then removes the plugin entirely.
 register_deactivation_hook(__FILE__, function () {
     TB_Reminders::deactivate();
     foreach (['tb_cleanup_old_reservations', 'tb_daily_digest'] as $hook) {
@@ -56,6 +63,8 @@ register_deactivation_hook(__FILE__, function () {
     TB_Telemetry::on_deactivation();
 });
 
+// Hooked to plugins_loaded so our classes are ready before themes or other plugins
+// that use init can try to interact with the shortcode or AJAX endpoints.
 function tb_boot() {
     load_plugin_textdomain('table-booking', false, dirname(TB_BASENAME) . '/languages');
 
@@ -81,6 +90,8 @@ function tb_boot() {
     add_action('init',               'tb_register_block');
 }
 
+// Registers a Gutenberg block backed by the same shortcode render callback.
+// Wraps the existence check so the plugin doesn't break on older WP versions.
 function tb_register_block(): void {
     if (!function_exists('register_block_type')) return;
     wp_register_script(
@@ -97,6 +108,9 @@ function tb_register_block(): void {
 }
 add_action('plugins_loaded', 'tb_boot');
 
+// Only loads assets on pages that actually contain the booking form — checks for
+// the shortcode, the Gutenberg block, and an escape-hatch filter for page builders.
+// Non-modern themes get CSS variable overrides inlined rather than an extra file.
 function tb_enqueue_frontend() {
     $post_id = get_the_ID();
     $content = $post_id ? get_post_field('post_content', $post_id) : '';
@@ -156,6 +170,8 @@ function tb_enqueue_frontend() {
     ]);
 }
 
+// Adds the defer attribute to the booking JS tag. The script initialises on
+// DOMContentLoaded so deferring it doesn't affect anything and helps page speed scores.
 function tb_defer_booking_script(string $tag, string $handle): string {
     if ($handle === 'tb-booking') {
         return str_replace(' src=', ' defer src=', $tag);
@@ -163,6 +179,9 @@ function tb_defer_booking_script(string $tag, string $handle): string {
     return $tag;
 }
 
+// Returns the built-in theme definitions used by both the style picker and the
+// enqueue function. Each theme is a set of CSS custom property overrides applied
+// to the booking wrapper element.
 function tb_style_themes(): array {
     return [
         'modern' => [
@@ -266,6 +285,9 @@ function tb_style_themes(): array {
     ];
 }
 
+// Self-service cancellation handler linked from confirmation emails. Uses an HMAC
+// token rather than a nonce so the link stays valid indefinitely without the guest
+// needing a WordPress account or an active session.
 function tb_handle_cancel(): void {
     if (($_GET['tb_action'] ?? '') !== 'cancel') return;
 
@@ -336,6 +358,9 @@ function tb_handle_cancel(): void {
     exit;
 }
 
+// Generates a .ics calendar file for the guest. Times are stored as floating local
+// times (no UTC offset) which is correct for a restaurant booking — the table is at
+// 7pm local time regardless of what timezone the guest's calendar app is configured for.
 function tb_handle_ical(): void {
     if (($_GET['tb_action'] ?? '') !== 'ical') return;
 
@@ -394,6 +419,8 @@ function tb_handle_ical(): void {
     exit;
 }
 
+// One-click confirm link for admins, embedded in the new booking notification email.
+// Lets the admin approve the reservation from their inbox without needing to log in.
 function tb_handle_admin_confirm(): void {
     if (($_GET['tb_action'] ?? '') !== 'admin_confirm') return;
 
@@ -454,6 +481,8 @@ function tb_handle_admin_confirm(): void {
     exit;
 }
 
+// Renders the multi-step booking form. Cache-control headers are set here because
+// a cached page with a stale nonce would silently break every AJAX submission.
 function tb_render_booking_form() {
     // Tell caching plugins not to cache pages containing the booking form,
     // as a cached page will have a stale nonce that breaks AJAX submissions.
@@ -602,6 +631,8 @@ function tb_render_booking_form() {
     return ob_get_clean();
 }
 
+// Plain-text daily summary of bookings, fired by WP-Cron. Returns early if the
+// feature is disabled so the cron event can stay registered without doing any work.
 function tb_send_daily_digest(): void {
     if (!TB_Database::get_setting('daily_digest_enabled', '0')) return;
 

@@ -1,8 +1,14 @@
 <?php
 defined('ABSPATH') || exit;
 
+// Static utility class for DB setup and settings access. Settings are read via
+// get_all_settings() which runs a two-layer cache: static (per-request) then WP
+// object cache (persists between requests if a persistent cache plugin is active).
 class TB_Database {
 
+    // dbDelta handles both fresh installs and upgrades — adds missing tables and columns
+    // but never drops anything. The double space before PRIMARY KEY is intentional; dbDelta's
+    // parser requires it and will create a duplicate key index if you remove it.
     public static function install() {
         global $wpdb;
 
@@ -75,6 +81,8 @@ class TB_Database {
         update_option('tb_db_version', TB_VERSION);
     }
 
+    // Called on every page load from tb_boot. The version comparison exits immediately
+    // when up to date, so the overhead is a single option read per request.
     public static function maybe_upgrade(): void {
         $installed = get_option('tb_db_version', '0.0.0');
         if (version_compare($installed, TB_VERSION, '>=')) return;
@@ -82,6 +90,8 @@ class TB_Database {
         self::install();
     }
 
+    // INSERT IGNORE means re-running this on upgrade won't overwrite settings the
+    // user has already changed. Only genuinely missing keys get inserted.
     private static function seed_defaults() {
         global $wpdb;
         $s = $wpdb->prefix . 'tb_settings';
@@ -165,6 +175,9 @@ class TB_Database {
 
     private static ?array $cache = null;
 
+    // Two-layer cache: the static property handles repeated calls within the same
+    // request; the WP object cache handles subsequent requests when a persistent
+    // cache (Redis, Memcached) is active. Both are invalidated on every write.
     public static function get_all_settings(): array {
         if (self::$cache !== null) return self::$cache;
 
@@ -191,6 +204,8 @@ class TB_Database {
         return isset($all[$key]) ? (string) $all[$key] : $default;
     }
 
+    // UPSERT via ON DUPLICATE KEY UPDATE — inserts on first save, updates on subsequent ones.
+    // Both cache layers are cleared after every write so the next read is always fresh.
     public static function update_setting(string $key, string $value): bool {
         global $wpdb;
         $result = $wpdb->query(

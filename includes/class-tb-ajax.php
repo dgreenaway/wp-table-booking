@@ -1,6 +1,8 @@
 <?php
 defined('ABSPATH') || exit;
 
+// AJAX handler class. Public endpoints are open to guests and logged-in users;
+// admin endpoints check capabilities directly so they can't be called anonymously.
 class TB_Ajax {
 
     public function init(): void {
@@ -22,6 +24,8 @@ class TB_Ajax {
     // Frontend handlers
     // =========================================================================
 
+    // Returns available time slots for the requested date and area. Also checks the
+    // day-of-week schedule and closed dates here so the JS doesn't need a preflight call.
     public function tb_get_times(): void {
         check_ajax_referer('tb_frontend', 'nonce');
 
@@ -53,6 +57,9 @@ class TB_Ajax {
         wp_send_json_success($slots);
     }
 
+    // Main booking submission endpoint. Checks honeypot, rate limit, duplicates, and
+    // availability in sequence, then hands off to create() which re-verifies everything
+    // under a DB advisory lock to prevent race conditions on simultaneous submissions.
     public function tb_submit_booking(): void {
         check_ajax_referer('tb_frontend', 'nonce');
 
@@ -178,6 +185,8 @@ class TB_Ajax {
     // Admin handlers
     // =========================================================================
 
+    // Quick-update handler used by the inline status button in the reservations table.
+    // Status value is checked against an explicit allowlist before touching the DB.
     public function tb_update_status(): void {
         check_ajax_referer('tb_admin', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
@@ -200,6 +209,8 @@ class TB_Ajax {
         wp_send_json_error('Update failed');
     }
 
+    // Receives the full canvas state as JSON and persists it in one go. stripslashes
+    // is needed because WordPress adds magic quotes to all POST data in AJAX requests.
     public function tb_save_layout(): void {
         check_ajax_referer('tb_layout', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
@@ -215,6 +226,8 @@ class TB_Ajax {
         wp_send_json_success('Layout saved');
     }
 
+    // Returns occupied table IDs for a specific date/time so the floor plan canvas
+    // can highlight booked tables in red when the admin uses the overlay view.
     public function tb_get_overlay(): void {
         check_ajax_referer('tb_layout', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
@@ -230,6 +243,8 @@ class TB_Ajax {
         wp_send_json_success(['booked_ids' => array_map('intval', $booked)]);
     }
 
+    // Populates the time slot dropdown for the canvas overlay date picker. Uses the
+    // same opening/closing/slot-duration settings as the front-end availability check.
     public function tb_get_overlay_times(): void {
         check_ajax_referer('tb_layout', 'nonce');
         if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');

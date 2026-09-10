@@ -10,6 +10,8 @@ class TB_Emails {
     // Public senders
     // =========================================================================
 
+    // The notification includes a one-click "Confirm Booking" link with an HMAC token
+    // so the admin can approve directly from their inbox without logging in.
     public static function send_admin_notification(int $id): bool {
         $cfg = TB_Database::get_all_settings();
         if (empty($cfg['notify_admin'])) return false;
@@ -67,6 +69,8 @@ class TB_Emails {
         return $sent;
     }
 
+    // Confirmation email includes both a cancel link and an .ics calendar link.
+    // Both use HMAC tokens so they stay valid without the guest needing an account.
     public static function send_client_confirmation(int $id): bool {
         $cfg = TB_Database::get_all_settings();
         if (empty($cfg['email_notifications'])) return false;
@@ -290,6 +294,8 @@ class TB_Emails {
     const S_BTN       = 'display:inline-block;padding:12px 24px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
     const S_BTN_GREEN = 'display:inline-block;padding:12px 24px;background:#059669;color:#ffffff;text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;';
 
+    // Builds a table-based HTML email layout. We avoid CSS classes entirely and use
+    // inline styles throughout so it renders correctly in Outlook and older clients.
     private static function wrap(
         string $heading,
         string $subheading,
@@ -403,6 +409,8 @@ HTML;
     // Mailer
     // =========================================================================
 
+    // The wp_mail_content_type filter must be removed immediately after sending —
+    // if left in place it would make every subsequent email in the same request HTML.
     private static function mail(string $to, string $subject, string $html, array $cfg): bool {
         $from_name  = !empty($cfg['email_from_name'])    ? $cfg['email_from_name']    : ($cfg['restaurant_name'] ?? get_bloginfo('name'));
         $from_email = !empty($cfg['email_from_address']) ? $cfg['email_from_address'] : get_option('admin_email');
@@ -424,6 +432,8 @@ HTML;
     // Data loader
     // =========================================================================
 
+    // Central data loader for all email templates. Pulls the reservation row, resolves
+    // the area label, and calculates the end time so each sender doesn't repeat this.
     private static function load(int $id): ?array {
         $res = new TB_Reservations();
         $row = $res->get($id);

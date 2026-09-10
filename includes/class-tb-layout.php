@@ -1,6 +1,8 @@
 <?php
 defined('ABSPATH') || exit;
 
+// CRUD wrapper for the tb_tables table. Individual operations cover the admin detail
+// view; save_layout() handles the bulk canvas save which replaces the whole table set.
 class TB_Layout {
 
     private string $table;
@@ -60,6 +62,8 @@ class TB_Layout {
     // Bulk save from canvas editor
     // -------------------------------------------------------------------------
 
+    // Upserts every table from the canvas state then deletes any rows whose IDs weren't
+    // in the new set. This is how the editor removes tables — not via a separate DELETE call.
     public function save_layout(array $tables): void {
         global $wpdb;
 
@@ -98,6 +102,8 @@ class TB_Layout {
     // Helpers
     // -------------------------------------------------------------------------
 
+    // Shape is validated against an allowlist; everything else is sanitized and clamped
+    // to sensible minimums so bad data from the canvas can't corrupt the table record.
     private function sanitize(array $d): array {
         $shape = in_array($d['shape'] ?? '', ['square', 'rectangle', 'circle'], true)
             ? $d['shape']

@@ -1,6 +1,8 @@
 <?php
 defined('ABSPATH') || exit;
 
+// Thin wrapper around the tb_logs table. Probabilistic pruning in write() keeps the
+// table from growing indefinitely without needing a separate scheduled cron event.
 class TB_Logger {
 
     public static function info(string $msg, string $ctx = 'system'): void {
@@ -15,6 +17,8 @@ class TB_Logger {
         self::write('error', $ctx, $msg);
     }
 
+    // Inserts the log entry, then on a 1-in-50 chance runs a cleanup DELETE for
+    // entries older than 30 days. Cheap enough to run inline without a cron.
     private static function write(string $level, string $ctx, string $msg): void {
         global $wpdb;
         $wpdb->insert(

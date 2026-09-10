@@ -9,6 +9,8 @@ defined('ABSPATH') || exit;
  */
 class TB_Privacy {
 
+    // Registers with WP's built-in privacy tools so the plugin appears automatically
+    // in Tools → Export Personal Data and Tools → Erase Personal Data.
     public static function register(): void {
         add_filter('wp_privacy_personal_data_exporters', [__CLASS__, 'register_exporter']);
         add_filter('wp_privacy_personal_data_erasers',   [__CLASS__, 'register_eraser']);
@@ -27,6 +29,8 @@ class TB_Privacy {
         return $exporters;
     }
 
+    // Returns all reservations for the email address in the format WP's data exporter
+    // expects — each row becomes a group of name/value pairs in the download ZIP.
     public static function export_data(string $email, int $page = 1): array {
         global $wpdb;
 
@@ -75,6 +79,8 @@ class TB_Privacy {
         return $erasers;
     }
 
+    // Hard-deletes all reservations for this email. Fires from WP's erasure flow —
+    // irreversible, and intentionally so to comply with data removal requests.
     public static function erase_data(string $email, int $page = 1): array {
         global $wpdb;
 
@@ -100,6 +106,9 @@ class TB_Privacy {
     // Privacy policy suggested text
     // -------------------------------------------------------------------------
 
+    // Suggests boilerplate privacy policy text the site owner can copy into their
+    // policy page from Tools → Privacy Policy. WP surfaces it as a suggestion only —
+    // it's never auto-published.
     public static function add_policy_content(): void {
         if (!function_exists('wp_add_privacy_policy_content')) return;
 

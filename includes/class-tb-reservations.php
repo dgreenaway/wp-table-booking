@@ -1,6 +1,9 @@
 <?php
 defined('ABSPATH') || exit;
 
+// Core reservation class. create() and admin_create() are intentionally separate:
+// create() enforces rate limiting, advisory locking, and availability checks;
+// admin_create() trusts the caller and skips all of that for speed.
 class TB_Reservations {
 
     private string $rtable;
@@ -100,6 +103,8 @@ class TB_Reservations {
         return $id;
     }
 
+    // Fetches a single reservation with the table name joined in so callers don't
+    // have to fire a second query just to display the table label.
     public function get(int $id): ?array {
         global $wpdb;
         $row = $wpdb->get_row(
@@ -115,6 +120,8 @@ class TB_Reservations {
         return $row ?: null;
     }
 
+    // Columns are validated against an allowlist before the update — this stops
+    // arbitrary field overwrites if anything unexpected ends up in $data.
     public function update(int $id, array $data): bool {
         global $wpdb;
         $allowed  = ['status','customer_name','customer_email','customer_phone',
@@ -212,6 +219,8 @@ class TB_Reservations {
     // Queries
     // -------------------------------------------------------------------------
 
+    // orderby is validated against an allowlist before interpolation — prepared
+    // statements can't parameterise column names so we have to do it ourselves.
     public function get_all(array $args = []): array {
         global $wpdb;
         $args = wp_parse_args($args, [
@@ -285,6 +294,8 @@ class TB_Reservations {
         delete_transient(self::avail_cache_key($date, $area));
     }
 
+    // The 2-minute transient keeps the slot list feeling live during a busy service
+    // without hammering the DB on every page load. Cache is busted on every booking.
     public function get_availability(string $date, string $area): array {
         $cache_key = self::avail_cache_key($date, $area);
         $cached    = get_transient($cache_key);
@@ -444,6 +455,8 @@ class TB_Reservations {
         );
     }
 
+    // Picks the smallest table that fits the party (ORDER BY capacity ASC) to leave
+    // larger tables free for bigger groups that might book the same slot later.
     public function find_available_table(string $date, string $time, string $area, int $party): ?int {
         if ((TB_Database::get_setting('booking_mode', 'simple')) === 'simple') {
             return null; // simple mode — no individual table assignment
@@ -474,6 +487,8 @@ class TB_Reservations {
         return $id ? (int) $id : null;
     }
 
+    // Single-query summary for the dashboard stat bar. All three counts (today,
+    // pending, upcoming) are rolled into one SELECT to save two DB round-trips.
     public function get_stats(): array {
         global $wpdb;
         $today = current_time('Y-m-d');
@@ -512,6 +527,8 @@ class TB_Reservations {
         );
     }
 
+    // Builds the WHERE clause and params array shared by get_all() and count(). The
+    // search term hits name, email, and reservation_number in a single LIKE per column.
     private function build_where(array $args): array {
         global $wpdb;
         $where  = ['1=1'];
@@ -540,6 +557,8 @@ class TB_Reservations {
         return [implode(' AND ', $where), $params];
     }
 
+    // RES- plus 8 random alphanumeric chars. Long enough to be collision-resistant,
+    // short enough for a guest to read out over the phone if they need to.
     private function generate_number(): string {
         return 'RES-' . strtoupper(wp_generate_password(8, false));
     }
@@ -548,6 +567,8 @@ class TB_Reservations {
     // Data retention cleanup (called by weekly cron)
     // -------------------------------------------------------------------------
 
+    // Only removes completed, cancelled, and no-show records. Active and pending
+    // reservations are never touched by the retention policy regardless of thier age.
     public static function cleanup_old(): void {
         $days = (int) TB_Database::get_setting('data_retention_days', '0');
         if ($days < 1) return;

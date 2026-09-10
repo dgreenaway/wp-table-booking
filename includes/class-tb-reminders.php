@@ -39,6 +39,9 @@ class TB_Reminders {
     // Cron callback
     // -------------------------------------------------------------------------
 
+    // Scans all upcoming non-cancelled reservations and fires any reminder whose send
+    // window has opened. Already-sent reminders are tracked per-row in reminders_sent
+    // so we never send the same one twice even if the cron fires more than once.
     public static function process(): void {
         $cfg = TB_Database::get_all_settings();
 
@@ -117,6 +120,8 @@ class TB_Reminders {
     // Reset reminders when a reservation is cancelled (stops future sends)
     // -------------------------------------------------------------------------
 
+    // Writes a sentinel value to reminders_sent so the cron loop skips this reservation
+    // entirely on future runs. Cleaner than trying to delete or null out the column.
     public static function cancel_for_reservation(int $id): void {
         global $wpdb;
         $wpdb->update(
@@ -132,6 +137,8 @@ class TB_Reminders {
     // Default reminder config
     // -------------------------------------------------------------------------
 
+    // Default schedule: 24h and 2h before the booking. A third slot is pre-configured
+    // but disabled so the user can switch it on without needing to set the hours first.
     public static function default_config(): string {
         return wp_json_encode([
             ['enabled' => true,  'hours' => 24, 'label' => '24 hours before'],

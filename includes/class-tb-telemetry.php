@@ -1,6 +1,9 @@
 <?php
 defined('ABSPATH') || exit;
 
+// Anonymous usage telemetry. Currently disabled (ENABLED = false) until the receiving
+// endpoint is deployed. The opt-in/out UI and the consent flow are fully wired up
+// regardless, so users can manage thier preference in advance.
 class TB_Telemetry {
 
     const ENABLED    = false; // flip to true once the Cloudflare Worker is deployed
@@ -35,6 +38,8 @@ class TB_Telemetry {
         wp_clear_scheduled_hook('tb_telemetry_ping');
     }
 
+    // Only shown on plugin-owned pages or the dashboard to avoid cluttering every
+    // admin screen. Also guards on ENABLED so it never shows while telemetry is off.
     public static function maybe_show_notice(): void {
         if (!self::ENABLED) return;
         if (get_option(self::OPT_STATUS) !== 'pending') return;
@@ -64,6 +69,8 @@ class TB_Telemetry {
         <?php
     }
 
+    // Handles the opt-in/out form. Opted-in fires an immediate ping and schedules
+    // a monthly repeat; opted-out clears any existing scheduled event.
     public static function handle_response(): void {
         check_admin_referer('tb_telemetry_response', 'tb_telemetry_nonce');
         if (!current_user_can('manage_options')) wp_die('Forbidden');
@@ -89,6 +96,8 @@ class TB_Telemetry {
         exit;
     }
 
+    // Non-blocking HTTP POST with a 5-second timeout so a slow or dead endpoint
+    // doesn't add noticeable latency to whatever admin action triggered the cron.
     public static function send_ping(): void {
         if (!self::ENABLED) return;
         if (get_option(self::OPT_STATUS) !== 'opted_in') return;

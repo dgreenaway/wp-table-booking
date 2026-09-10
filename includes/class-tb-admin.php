@@ -1,8 +1,12 @@
 <?php
 defined('ABSPATH') || exit;
 
+// Handles all admin-side functionality: menu pages, form submissions, and page rendering.
+// Each public handle_* method maps to an admin_post_{action} hook registered in init().
 class TB_Admin {
 
+    // Wire up all hooks. We use admin_post_{action} for form submissions so WordPress
+    // handles the auth check and nonce flow cleanly without touching admin_init.
     public function init(): void {
         add_action('admin_menu',            [$this, 'register_menu']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_assets']);
@@ -24,6 +28,8 @@ class TB_Admin {
         add_action('admin_post_tb_send_support',          [$this, 'handle_send_support']);
     }
 
+    // Fires once after activation. The transient is created in the activation hook and
+    // consumed here — so we only bounce to setup once, not every time the admin loads.
     public function maybe_redirect_to_setup(): void {
         if (isset($_GET['activate-multi']))   return;
         if (!get_transient('tb_activation_redirect')) return;
@@ -34,6 +40,8 @@ class TB_Admin {
         exit;
     }
 
+    // tb-setup is registered with null as the parent so it stays out of the sidebar —
+    // only reachable via the activation redirect or by typing the URL directly.
     public function register_menu(): void {
         add_menu_page(
             'getBooked',
@@ -55,6 +63,8 @@ class TB_Admin {
         add_submenu_page(null,              'getBooked Setup', '',               'manage_options', 'tb-setup',        [$this, 'page_setup']);
     }
 
+    // Bail immediately on any admin page that isn't ours. Checking the hook string is
+    // more reliable here than the page query var, which may not be populated yet.
     public function enqueue_assets(string $hook): void {
         if (!str_contains($hook, 'tb-')) return;
 
@@ -92,6 +102,8 @@ class TB_Admin {
     // Setup wizard
     // =========================================================================
 
+    // Full-screen setup wizard. The sidebar and admin bar are hidden via inline CSS so
+    // it doesn't look like a settings page crammed into the normal WordPress chrome.
     public function page_setup(): void {
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
 
@@ -141,6 +153,8 @@ class TB_Admin {
         <?php
     }
 
+    // Renders the numbered step dots at the top of the wizard. The flex connector
+    // line between dots is only output between steps, not after the last one.
     private function render_setup_progress(int $step): void {
         $labels = ['Your Restaurant', 'Opening Hours', 'Seating Areas', 'Done'];
         echo '<div style="display:flex;align-items:flex-start;justify-content:center;max-width:540px;width:100%;">';
@@ -169,6 +183,8 @@ class TB_Admin {
         echo '</div>';
     }
 
+    // Step 1 — restaurant name, address, and notification email. These feed into the
+    // emails that go out to guests, so we want them configured before anything else.
     private function render_setup_step1(array $cfg): void { ?>
         <h2 style="margin:0 0 4px;font-size:19px;font-weight:700;color:#111827;">Your restaurant</h2>
         <p style="margin:0 0 24px;color:#6b7280;font-size:14px;">These details appear in emails sent to your guests.</p>
@@ -201,6 +217,8 @@ class TB_Admin {
         </form>
     <?php }
 
+    // Step 2 — opening hours. The preset buttons are JS shortcuts that just tick/untick
+    // the day checkboxes; all the actual validation and saving happens server-side.
     private function render_setup_step2(array $cfg): void {
         $weekly_h = json_decode($cfg['weekly_hours'] ?? '{}', true);
         $def_open  = $cfg['opening_time'] ?? '12:00';
@@ -267,6 +285,8 @@ class TB_Admin {
         </script>
     <?php }
 
+    // Step 3 — seating areas. JS handles adding/removing rows in the UI; PHP on the
+    // recieve end does the ID uniqueness check so you can't end up with duplicate area keys.
     private function render_setup_step3(array $cfg): void {
         $areas = json_decode($cfg['areas'] ?? '[]', true);
         ?>
@@ -327,6 +347,8 @@ class TB_Admin {
         </script>
     <?php }
 
+    // Final step — shows the shortcode and a "create page for me" button. If page_created
+    // is already in the query string we swap in a "view it live" link instead.
     private function render_setup_step4(): void {
         $page_created = isset($_GET['page_created']);
         $page_url     = $page_created ? esc_url(get_permalink((int) $_GET['page_created'])) : '';
@@ -374,6 +396,9 @@ class TB_Admin {
         </script>
     <?php }
 
+    // The reservations list doubles as a mini router. Depending on the 'view' param it
+    // renders the main table, a single detail card, the new booking form, or a printable
+    // run sheet — all within the same function call.
     public function page_reservations(): void {
         $res   = new TB_Reservations();
         $stats = $res->get_stats();
@@ -599,6 +624,8 @@ class TB_Admin {
         <?php
     }
 
+    // Admin-side new booking form. In layout mode the table picker row is shown;
+    // in simple mode it's omitted since there are no individual tables to assign.
     private function render_new_reservation_form(array $areas, array $status_options): void {
         $cfg     = TB_Database::get_all_settings();
         $layout  = new TB_Layout();
@@ -712,6 +739,8 @@ class TB_Admin {
         <?php
     }
 
+    // Two-column layout — left card shows read-only guest and booking details, right card
+    // has the editable fields: status, table assignment, and internal admin notes.
     private function render_reservation_detail(int $id, array $areas, array $status_options): void {
         $res    = new TB_Reservations();
         $layout = new TB_Layout();
@@ -807,6 +836,8 @@ class TB_Admin {
         <?php
     }
 
+    // Floor plan editor. If simple mode is active we show an info notice and bail early —
+    // no point rendering the canvas when floor plan assignment isn't being used.
     public function page_layout(): void {
         $cfg   = TB_Database::get_all_settings();
         $mode  = $cfg['booking_mode'] ?? 'simple';
@@ -948,6 +979,8 @@ class TB_Admin {
         <?php
     }
 
+    // Four-tab settings page. All tabs share a single form that posts to the same handler,
+    // which reads a hidden 'tb_settings_tab' field to redirect back to the right tab.
     public function page_settings(): void {
         $cfg        = TB_Database::get_all_settings();
         $areas      = json_decode($cfg['areas'] ?? '[]', true);
@@ -1307,6 +1340,8 @@ class TB_Admin {
         <?php
     }
 
+    // Lightweight reporting — a handful of aggregate queries on the reservations table.
+    // Not cached because this is admin-only and the dataset is typically small enough.
     public function page_reports(): void {
         global $wpdb;
         $table = $wpdb->prefix . 'tb_reservations';
@@ -1426,6 +1461,8 @@ class TB_Admin {
         <?php
     }
 
+    // Shows the 500 most recent log entries. Level and context filters are client-side
+    // only — JS hides/shows rows — so no extra DB queries are fired when filtering.
     public function page_logs(): void {
         if (isset($_GET['cleared'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Log cleared.</p></div>';
@@ -1500,6 +1537,8 @@ class TB_Admin {
     // Form handlers
     // =========================================================================
 
+    // Only sends a status email if the status actually changed AND it's one we email on.
+    // Avoids spamming guests when an admin just updates a note or reassigns a table.
     public function handle_save_reservation(): void {
         check_admin_referer('tb_save_reservation', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -1524,6 +1563,8 @@ class TB_Admin {
         exit;
     }
 
+    // The nonce includes the reservation ID so you can't swap the id param after the
+    // link is generated and accidentally delete a different reservation.
     public function handle_delete_reservation(): void {
         $id = (int) ($_GET['id'] ?? 0);
         check_admin_referer('tb_delete_' . $id, 'tb_nonce');
@@ -1534,6 +1575,8 @@ class TB_Admin {
         exit;
     }
 
+    // Saves all settings tabs through one handler. The active tab is passed in a hidden
+    // field so we can redirect back to whichever tab the user was on when they saved.
     public function handle_save_settings(): void {
         check_admin_referer('tb_save_settings', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -1630,6 +1673,8 @@ class TB_Admin {
         exit;
     }
 
+    // All email settings on one page — branding, delivery, notifications, content,
+    // daily digest, and reminders. People tend to configure these together anyway.
     public function page_emails(): void {
         if (isset($_GET['saved'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Email settings saved.</p></div>';
@@ -1822,6 +1867,8 @@ class TB_Admin {
         <?php
     }
 
+    // The daily digest cron is only rescheduled when the send time actually changes —
+    // no need to clear and re-add it on every save if the time hasn't moved.
     public function handle_save_emails(): void {
         check_admin_referer('tb_save_emails', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -1890,6 +1937,8 @@ class TB_Admin {
         exit;
     }
 
+    // Theme picker plus layout/responsiveness options. "Site Styles" is a special value
+    // that skips all plugin CSS and lets the active WordPress theme handle everything.
     public function page_styles(): void {
         if (isset($_GET['saved'])) {
             echo '<div class="notice notice-success is-dismissible"><p>Style settings saved.</p></div>';
@@ -2019,6 +2068,8 @@ class TB_Admin {
         <?php
     }
 
+    // Tiny inline HTML mockup of the booking form using the theme's CSS variable values.
+    // Fully self-contained so we don't need iframes or any JS to render the preview.
     private function render_style_preview(array $theme): string {
         $d = [
             '--tb-primary'      => '#2563eb',
@@ -2054,6 +2105,9 @@ class TB_Admin {
                '</div>';
     }
 
+    // Intercepts the WP deactivate link and shows a modal explaining what data is and
+    // isn't deleted before the user confirms. The jQuery selector matches on the plugin
+    // file param in the href so we only intercept our own link, not other plugins'.
     public function deactivation_modal(): void {
         $settings_url = admin_url('admin.php?page=tb-settings#tb-data-privacy');
         $plugin_file  = urlencode(TB_BASENAME);
@@ -2102,6 +2156,8 @@ class TB_Admin {
         <?php
     }
 
+    // Every style option is validated against an explicit allowlist before saving.
+    // sanitize_key alone wouldn't be enough — it strips bad chars but doesn't check values.
     public function handle_save_styles(): void {
         check_admin_referer('tb_save_styles', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2139,6 +2195,8 @@ class TB_Admin {
         exit;
     }
 
+    // After wiping the log we immediately write a "cleared by {user}" entry so there's
+    // always a record of who did it and when, even in an otherwise empty log.
     public function handle_clear_logs(): void {
         check_admin_referer('tb_clear_logs', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2150,6 +2208,8 @@ class TB_Admin {
         exit;
     }
 
+    // Streams CSV directly to the browser via php://output rather than building the
+    // whole string in memory. Handles several thousand rows without breaking a sweat.
     public function handle_export_csv(): void {
         check_admin_referer('tb_export_csv', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2195,6 +2255,9 @@ class TB_Admin {
         exit;
     }
 
+    // Required fields are validated here server-side even though the form uses HTML
+    // required attributes, since those can be bypassed. notify_guest lets staff skip
+    // the confirmation email for walk-ins or bookings taken over the phone.
     public function handle_create_reservation(): void {
         check_admin_referer('tb_create_reservation', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2229,6 +2292,8 @@ class TB_Admin {
         exit;
     }
 
+    // Dumps the full settings table to a JSON file. The import handler validates it's an
+    // array before writing anything, so a corrupted file won't silently wipe your settings.
     public function handle_export_settings(): void {
         check_admin_referer('tb_export_settings', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2243,6 +2308,8 @@ class TB_Admin {
         exit;
     }
 
+    // The 'id' key is explicitly skipped — we don't want to import a database row ID from
+    // another site that could conflict with this installation's primary key sequence.
     public function handle_import_settings(): void {
         check_admin_referer('tb_import_settings', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2272,6 +2339,8 @@ class TB_Admin {
         exit;
     }
 
+    // Handles one wizard step at a time. Each step has its own nonce so you can't
+    // accidentally POST step-3 data into the step-1 handler by tweaking the form.
     public function handle_save_setup(): void {
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
 
@@ -2358,6 +2427,8 @@ class TB_Admin {
         exit;
     }
 
+    // Convenience feature from the end of setup — creates a published page with the
+    // shortcode already in it so the user doesn't have to set that up seperately.
     public function handle_create_booking_page(): void {
         check_admin_referer('tb_create_booking_page', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2380,6 +2451,8 @@ class TB_Admin {
         exit;
     }
 
+    // Bulk confirm and cancel both trigger status emails, same as the single-edit handler.
+    // Rows already in the target status are skipped to avoid sending duplicate emails.
     public function handle_bulk_action(): void {
         check_admin_referer('tb_bulk_action', 'tb_nonce');
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
@@ -2429,6 +2502,8 @@ class TB_Admin {
         exit;
     }
 
+    // Renders a clean run sheet and auto-triggers the browser print dialog via onload.
+    // We exit after output so WordPress admin chrome doesn't wrap around the page.
     private function render_print_view(string $date, array $areas, array $status_options): void {
         if (!current_user_can('manage_options')) wp_die('Unauthorized');
 
@@ -2530,6 +2605,8 @@ class TB_Admin {
     // Support page
     // =========================================================================
 
+    // The system info block is opt-in but ticked by default — it speeds up bug reports
+    // considerably when people include it without us having to ask them separately.
     public function page_support(): void {
         $current_user = wp_get_current_user();
         $sent  = isset($_GET['sent'])  && $_GET['sent']  === '1';
@@ -2639,6 +2716,8 @@ class TB_Admin {
         <?php
     }
 
+    // Rate-limited to one message per hour per user to prevent accidental double sends.
+    // The reply-to header is set to the user's address so replies go back to them directly.
     public function handle_send_support(): void {
         check_admin_referer('tb_send_support', 'tb_support_nonce');
         if (!current_user_can('manage_options')) wp_die('Forbidden');
